@@ -1,5 +1,6 @@
 package dev.david.tessel.core.net
 
+import dev.david.tessel.core.content.Bestiary
 import dev.david.tessel.core.content.Difficulty
 import dev.david.tessel.core.sim.Events
 import dev.david.tessel.core.sim.MAX_COINS
@@ -20,6 +21,10 @@ private const val ANGLE_SCALE = (127 / PI).toFloat()
  * shards, and the cap keeps the worst case under the radio's message limit.
  */
 const val SNAPSHOT_EVENTS = 200
+
+/** Enemy health travels in sixteenths; this value means "a boss, do not guess". */
+private const val HP_SCALE = 16f
+private const val UNKNOWN_HP = 0xFFFF
 
 /** Enemy shots fired, or used up, that one snapshot can carry. */
 const val SNAPSHOT_SHOTS = 1024
@@ -50,8 +55,13 @@ object Protocol {
         born: Events,
         gone: Events,
         forPlayer: Int,
+        echo: Echo,
     ) {
         Wire.begin(buf, Wire.SNAPSHOT)
+        buf.putInt(echo.seq)
+        buf.putInt(echo.stamp)
+        buf.putInt(echo.echo)
+        buf.putShort(echo.held.coerceIn(0, Short.MAX_VALUE.toInt()).toShort())
         buf.putInt(w.tick)
         buf.put(w.stage.coerceAtMost(255).toByte())
         buf.put(w.phase.ordinal.toByte())
@@ -87,6 +97,7 @@ object Protocol {
             buf.putFloat(pl.bulletSpeed(p))
             buf.putFloat(pl.range(p))
             buf.putFloat(pl.bulletRadius(p))
+            buf.putFloat(pl.damage(p))
             buf.put(pl.volley(p).toByte())
             buf.put(pl.pierce(p).toByte())
         }
@@ -102,6 +113,9 @@ object Protocol {
             val cue = (e.cue[i] * 127).toInt().coerceIn(0, 127)
             buf.put((cue or if (e.flash[i] > 0) 0x80 else 0).toByte())
             buf.put((e.angle[i] * ANGLE_SCALE).toInt().coerceIn(-127, 127).toByte())
+            // Health, so a joining phone can tell when its own shots finish something. Not for bosses.
+            val hp = if (Bestiary.of(e.type[i]).boss) UNKNOWN_HP else (e.hp[i] * HP_SCALE).toInt().coerceIn(1, UNKNOWN_HP - 1)
+            buf.putShort(hp.toShort())
         }
 
         // Enemy shots fired since the last snapshot: where, how fast, and how many ticks ago.
@@ -135,6 +149,7 @@ object Protocol {
             Wire.putUnit(buf, outbox.dx[i])
             Wire.putUnit(buf, outbox.dy[i])
             buf.put((outbox.angle[i] * ANGLE_SCALE).toInt().coerceIn(-127, 127).toByte())
+            buf.putShort(outbox.ref[i].toShort())
         }
 
         val inShop = w.phase == Phase.SHOP
@@ -159,6 +174,10 @@ object Protocol {
 
     /** Reads a snapshot written by [writeSnapshot]; [buf] must sit just past the header. */
     fun readSnapshot(buf: ByteBuffer, s: Snapshot) {
+        s.echo.seq = buf.int
+        s.echo.stamp = buf.int
+        s.echo.echo = buf.int
+        s.echo.held = buf.short.toInt()
         s.tick = buf.int
         s.stage = buf.get().toInt() and 0xFF
         s.phase = Phase.entries[buf.get().toInt()]
@@ -192,6 +211,7 @@ object Protocol {
             s.bulletSpeed[p] = buf.float
             s.range[p] = buf.float
             s.bulletRadius[p] = buf.float
+            s.damage[p] = buf.float
             s.volley[p] = buf.get().toInt()
             s.pierce[p] = buf.get().toInt()
         }
@@ -207,6 +227,8 @@ object Protocol {
             s.enemyFlash[i] = packed and 0x80 != 0
             s.enemyCue[i] = (packed and 0x7F) / 127f
             s.enemyAngle[i] = buf.get() / ANGLE_SCALE
+            val hp = buf.short.toInt() and 0xFFFF
+            s.enemyHp[i] = if (hp == UNKNOWN_HP) Float.POSITIVE_INFINITY else hp / HP_SCALE
             s.enemyIndex.put(s.enemyId[i], i)
         }
 
@@ -241,7 +263,8 @@ object Protocol {
             val dx = Wire.getUnit(buf)
             val dy = Wire.getUnit(buf)
             val angle = buf.get() / ANGLE_SCALE
-            s.events.add(kind, who, x, y, dx, dy, angle)
+            val ref = buf.short.toInt() and 0xFFFF
+            s.events.add(kind, who, x, y, dx, dy, angle, ref)
         }
 
         s.hasShop = buf.get().toInt() != 0
@@ -265,8 +288,12 @@ object Protocol {
      * What a joining phone sends 30 times a second: its stick, its trigger
      * and where it is, plus whatever it saw its shots hit and what hit it.
      */
-    fun writeInput(buf: ByteBuffer, input: PlayerInput, x: Float, y: Float, reports: Reports) {
+    fun writeInput(buf: ByteBuffer, input: PlayerInput, x: Float, y: Float, reports: Reports, echo: Echo) {
         Wire.begin(buf, Wire.INPUT)
+        buf.putInt(echo.seq)
+        buf.putInt(echo.stamp)
+        buf.putInt(echo.echo)
+        buf.putShort(echo.held.coerceIn(0, Short.MAX_VALUE.toInt()).toShort())
         Wire.putUnit(buf, input.moveX)
         Wire.putUnit(buf, input.moveY)
         Wire.putUnit(buf, input.aimX)
@@ -282,9 +309,15 @@ object Protocol {
         }
         buf.put(reports.hurts.toByte())
         for (k in 0 until reports.hurts) buf.putShort(reports.hurtBy[k].toShort())
+        buf.put(reports.pickups.toByte())
+        for (k in 0 until reports.pickups) buf.putShort(reports.pickupId[k].toShort())
     }
 
-    fun readInput(buf: ByteBuffer, into: PlayerInput, reports: Reports) {
+    fun readInput(buf: ByteBuffer, into: PlayerInput, reports: Reports, echo: Echo) {
+        echo.seq = buf.int
+        echo.stamp = buf.int
+        echo.echo = buf.int
+        echo.held = buf.short.toInt()
         into.moveX = Wire.getUnit(buf)
         into.moveY = Wire.getUnit(buf)
         into.aimX = Wire.getUnit(buf)
@@ -299,6 +332,8 @@ object Protocol {
         val hurts = buf.get().toInt() and 0xFF
         // A touch travels as 0xFFFF, which reads back as -1.
         repeat(hurts) { reports.hurt(buf.short.toInt()) }
+        val pickups = buf.get().toInt() and 0xFF
+        repeat(pickups) { reports.pickup(buf.short.toInt() and 0xFFFF) }
     }
 
     private fun putSpeed(buf: ByteBuffer, v: Float) {

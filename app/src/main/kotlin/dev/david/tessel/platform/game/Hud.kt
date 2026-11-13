@@ -45,6 +45,25 @@ class Hud(private val density: Float, fontScale: Float) {
     private var announced = -1
     private var announcedAt = 0L
 
+    /** Settings can hide the connection readout. */
+    var showLink = true
+    private var linkTrip = -1
+    private var linkQuality = -1
+    private val linkText = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        textSize = 13f * sp
+        fontFeatureSettings = "tnum"
+    }
+
+    /**
+     * The co-op link for the readout: round trip in milliseconds (-1 while
+     * unknown) and what carries it (0 unknown, 1 Bluetooth LE, 2 Bluetooth,
+     * 3 Wi-Fi). A [quality] of -1 means no link at all, so nothing shows.
+     */
+    fun link(roundTrip: Int, quality: Int) {
+        linkTrip = roundTrip
+        linkQuality = quality
+    }
+
     /** Shows a boss's name and a hint for a few seconds. [now] is uptime in milliseconds. */
     fun announce(type: Int, now: Long) {
         if (type !in 0 until Bestiary.size) return
@@ -54,7 +73,7 @@ class Hud(private val density: Float, fontScale: Float) {
     private val line = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
     private val buf = TextBuf()
 
-    fun draw(canvas: Canvas, w: World, palette: Palette, insetLeft: Int, insetTop: Int, me: Int, now: Long) {
+    fun draw(canvas: Canvas, w: World, palette: Palette, insetLeft: Int, insetTop: Int, insetRight: Int, me: Int, now: Long) {
         val pl = w.players
         val left = insetLeft + 20f * density
         val top = insetTop + 18f * density
@@ -83,6 +102,44 @@ class Hud(private val density: Float, fontScale: Float) {
 
         drawStageBar(canvas, w, palette, insetTop, me)
         drawAnnouncement(canvas, palette, now)
+        drawLink(canvas, palette, insetTop, insetRight)
+    }
+
+    /**
+     * "Wi-Fi  18 ms" at the top right, next to the pause button. The number
+     * and its dot turn amber, then red, as the round trip grows; a Bluetooth LE
+     * link is red whatever the number says, since it cannot keep up.
+     */
+    private fun drawLink(canvas: Canvas, palette: Palette, insetTop: Int, insetRight: Int) {
+        if (!showLink || linkQuality < 0) return
+        val label = when (linkQuality) {
+            3 -> "Wi-Fi"
+            2 -> "Bluetooth"
+            1 -> "Bluetooth LE"
+            else -> "Link"
+        }
+        val tint = when {
+            linkQuality == 1 -> palette.danger
+            linkTrip < 0 -> palette.ink3
+            linkTrip < GOOD_MS -> palette.zone(2)
+            linkTrip < SLOW_MS -> palette.coin
+            else -> palette.danger
+        }
+        buf.clear()
+        if (linkTrip < 0) buf.put("...") else buf.put(linkTrip).put(" ms")
+        val gap = 6f * density
+        val numberWidth = linkText.measureText(buf.chars, 0, buf.length)
+        val labelWidth = linkText.measureText(label)
+        // Clear of the pause button: its 48 dp target plus the 10 dp margin it sits in.
+        val right = canvas.width - insetRight - 68f * density
+        val baseline = insetTop + 31f * density
+        linkText.color = tint
+        canvas.drawText(buf.chars, 0, buf.length, right - numberWidth, baseline, linkText)
+        linkText.color = palette.ink2
+        val labelLeft = right - numberWidth - gap - labelWidth
+        canvas.drawText(label, labelLeft, baseline, linkText)
+        fill.color = tint
+        canvas.drawCircle(labelLeft - gap, baseline - linkText.textSize * 0.32f, 3.5f * density, fill)
     }
 
     private fun drawAnnouncement(canvas: Canvas, palette: Palette, now: Long) {
@@ -205,5 +262,9 @@ class Hud(private val density: Float, fontScale: Float) {
         const val BAR_WIDTH_DP = 168f
         const val TRACK_ALPHA = 90
         const val ANNOUNCE_MS = 3200L
+
+        /** Under this round trip the link is green; under [SLOW_MS] amber; from there red. */
+        const val GOOD_MS = 60
+        const val SLOW_MS = 120
     }
 }

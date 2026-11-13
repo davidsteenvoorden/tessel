@@ -22,6 +22,7 @@ import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.floor
 import kotlin.math.sin
+import kotlin.math.sqrt
 
 private const val RING = 16
 private const val STEP_NANOS = 1_000_000_000L / TICK_HZ
@@ -40,11 +41,24 @@ private const val CREEP_NANOS = 250_000L
 
 /** Snapshots this much later than expected, several in a row, mean the host clock jumped (pause, restart). */
 private const val RESYNC_NANOS = 250_000_000L
-private const val SNAP_DISTANCE = 120f
+/**
+ * This phone moves its own player and the host follows, so it never pulls the
+ * player back just because the host's copy is a round trip behind. Only a gap
+ * this large that lasts this long means the host really put the player
+ * somewhere else.
+ */
+private const val FAR_DISTANCE = 300f
+private const val FAR_STEPS = 45
 private const val TWO_PI = (2 * PI).toFloat()
 private const val HURT_TICKS = 8
 private const val FLASHES = 32
 private const val FLASH_STEPS = 3
+private const val MY_HITS = 256
+private const val UNSENT = Int.MAX_VALUE
+
+/** How long a body this phone saw break stays hidden while waiting for the host to agree. */
+private const val GUESS_STEPS = 90
+private const val GUESSES = 64
 private const val MARGIN = 24f
 
 /**
@@ -74,8 +88,27 @@ class ClientSession(val me: Int, private var players: Int, private val send: (By
     private var gapNanos = FIRST_GAP_NANOS
     private val pilot = Pilot()
     private val buf = Wire.buffer(1024)
-    private var inputCountdown = 0
     private val reports = Reports()
+    private val echo = Echo()
+    private var inputSeq = 0
+    private var hostStamp = 0
+    private var hostStampAt = 0
+    private var roundTrip = -1f
+    private var farSteps = 0
+
+    // This phone's hits that the host has not acted on yet: on what, how hard, and in which input.
+    private val myHitId = IntArray(MY_HITS)
+    private val myHitDamage = FloatArray(MY_HITS)
+    private val myHitSeq = IntArray(MY_HITS)
+    private var myHits = 0
+
+    // Enemies this phone saw its shots finish, and coins it walked into: hidden at once, until the host agrees.
+    private val deadId = IntArray(GUESSES)
+    private val deadUntil = IntArray(GUESSES)
+    private var deadNext = 0
+    private val takenId = IntArray(GUESSES)
+    private val takenUntil = IntArray(GUESSES)
+    private var takenNext = 0
     private val drift = Drift(MAX_HOSTILE)
     private val ghosts = BulletPool(MAX_BULLETS)
     private var ghostId = -1_000_000
@@ -92,6 +125,9 @@ class ClientSession(val me: Int, private var players: Int, private val send: (By
     /** Most recent snapshot, for menus: phase, pause, shop, scores. */
     val latest: Snapshot? get() = if (newest < 0) null else ring[newest]
 
+    /** Round trip to the host in milliseconds, smoothed, or -1 before it is known. */
+    val roundTripMillis: Int get() = roundTrip.toInt()
+
     /** How far behind the host the drawing runs right now, in nanoseconds. */
     val delayNanos: Long get() = (gapNanos * 3 / 2 + 12_000_000L).coerceIn(MIN_DELAY_NANOS, MAX_DELAY_NANOS)
 
@@ -106,6 +142,7 @@ class ClientSession(val me: Int, private var players: Int, private val send: (By
         drift.clear()
         ghosts.clear()
         reports.clear()
+        forgetGuesses()
         localInvuln = 0
         localHurt = 0
         view.reset(players = players, seed = 0)
@@ -129,8 +166,27 @@ class ClientSession(val me: Int, private var players: Int, private val send: (By
             pilot.reset()
             drift.clear()
             ghosts.clear()
+            forgetGuesses()
         }
         newest = slot
+
+        val now = HostSession.millis(nowNanos)
+        val trip = s.echo.roundTrip(now)
+        if (trip >= 0) roundTrip = HostSession.smooth(roundTrip, trip)
+        hostStamp = s.echo.stamp
+        hostStampAt = now
+        // Hits the host has acted on are in its health numbers now.
+        var k = 0
+        while (k < myHits) {
+            if (myHitSeq[k] != UNSENT && myHitSeq[k] <= s.echo.seq) {
+                myHits--
+                myHitId[k] = myHitId[myHits]
+                myHitDamage[k] = myHitDamage[myHits]
+                myHitSeq[k] = myHitSeq[myHits]
+            } else {
+                k++
+            }
+        }
         if (stored < RING) stored++
         players = s.playerCount
 
@@ -159,37 +215,47 @@ class ClientSession(val me: Int, private var players: Int, private val send: (By
         }
     }
 
-    /** One 60 Hz step of the local player; sends input every other step, and at once when there is news. */
-    fun tick(input: PlayerInput) {
+    /** One 60 Hz step of the local player. Sends its input every step. */
+    fun tick(input: PlayerInput, nowNanos: Long) {
         val s = latest ?: return
         val hostX = s.px[me]
         val hostY = s.py[me]
         if (!pilot.placed) pilot.place(hostX, hostY)
         val dx = hostX - pilot.x
         val dy = hostY - pilot.y
-        // The host only lags a little behind us; a big gap means it moved us (new run, new stage).
-        if (dx * dx + dy * dy > SNAP_DISTANCE * SNAP_DISTANCE) pilot.place(hostX, hostY)
+        if (dx * dx + dy * dy > FAR_DISTANCE * FAR_DISTANCE) {
+            if (++farSteps > FAR_STEPS) {
+                pilot.place(hostX, hostY)
+                farSteps = 0
+            }
+        } else {
+            farSteps = 0
+        }
 
         steps++
         if (pilot.step(input, s, me)) view.events.add(Events.SHOT, me)
+        stayOutOfBoss()
         val before = reports.hits
         pilot.cull(view, reports)
-        for (k in before until reports.hits) {
-            flashId[flashNext] = reports.hitId[k]
-            flashUntil[flashNext] = steps + FLASH_STEPS
-            flashNext = (flashNext + 1) % FLASHES
-        }
+        for (k in before until reports.hits) landed(s, reports.hitId[k], reports.hitX[k], reports.hitY[k])
         flyGhosts()
         if (localInvuln > 0) localInvuln--
         if (localHurt > 0) localHurt--
         if (s.hp[me] > 0 && !s.invuln[me] && localInvuln == 0) checkHurt()
+        if (s.hp[me] > 0) checkPickups()
 
+        val now = HostSession.millis(nowNanos)
         val news = !reports.isEmpty
-        if (--inputCountdown <= 0 || news) {
-            inputCountdown = 2
-            Protocol.writeInput(buf, input, pilot.x, pilot.y, reports)
-            // Hits and hurts must arrive, so they skip the queue for latest-only messages.
-            if (send(Wire.finish(buf), !news)) reports.clear()
+        inputSeq++
+        echo.seq = inputSeq
+        echo.stamp = now
+        echo.echo = hostStamp
+        echo.held = if (hostStamp == 0) 0 else now - hostStampAt
+        Protocol.writeInput(buf, input, pilot.x, pilot.y, reports, echo)
+        // Hits, hurts and pickups must arrive, so they skip the queue for latest-only messages.
+        if (send(Wire.finish(buf), !news)) {
+            for (k in 0 until myHits) if (myHitSeq[k] == UNSENT) myHitSeq[k] = inputSeq
+            reports.clear()
         }
     }
 
@@ -259,6 +325,7 @@ class ClientSession(val me: Int, private var players: Int, private val send: (By
         val e = v.enemies
         e.clear()
         for (i in 0 until to.enemyCount) {
+            if (guessed(deadId, deadUntil, to.enemyId[i])) continue
             var x = to.enemyX[i]
             var y = to.enemyY[i]
             var angle = to.enemyAngle[i]
@@ -270,7 +337,7 @@ class ClientSession(val me: Int, private var players: Int, private val send: (By
                 if (turn > PI) turn -= TWO_PI else if (turn < -PI) turn += TWO_PI
                 angle = from.enemyAngle[j] + turn * t
             }
-            val k = e.add(to.enemyId[i], to.enemyType[i], x, y, 1f)
+            val k = e.add(to.enemyId[i], to.enemyType[i], x, y, to.enemyHp[i])
             if (k >= 0) {
                 e.flash[k] = if (to.enemyFlash[i] || justHit(to.enemyId[i])) 1 else 0
                 e.angle[k] = angle
@@ -306,6 +373,7 @@ class ClientSession(val me: Int, private var players: Int, private val send: (By
         val c = v.coins
         c.clear()
         for (k in 0 until to.coinCount) {
+            if (guessed(takenId, takenUntil, to.coinId[k])) continue
             var x = to.coinX[k]
             var y = to.coinY[k]
             val j = from.coinIndex[to.coinId[k]]
@@ -329,6 +397,8 @@ class ClientSession(val me: Int, private var players: Int, private val send: (By
                     ev.kind[n] == Events.SHOT -> ghostVolley(top, ev.who[n], ev.x[n], ev.y[n], ev.dx[n], ev.dy[n])
                     // This phone already knew it was hit, and buzzed then.
                     ev.kind[n] == Events.PLAYER_HIT && ev.who[n] == me -> Unit
+                    // Already shown breaking here, the moment this phone's shot finished it.
+                    (ev.kind[n] == Events.ENEMY_KILLED || ev.kind[n] == Events.ENEMY_GONE) && settle(ev.ref[n]) -> Unit
                     else -> v.events.add(ev.kind[n], ev.who[n], ev.x[n], ev.y[n], ev.dx[n], ev.dy[n], ev.angle[n])
                 }
             }
@@ -361,6 +431,97 @@ class ClientSession(val me: Int, private var players: Int, private val send: (By
             hurt()
             return
         }
+    }
+
+    /**
+     * A shot of ours reached enemy [id16]. It flashes at once, and if what it
+     * has taken from us since the host last counted finishes it, it breaks
+     * now rather than a round trip from now.
+     */
+    private fun landed(s: Snapshot, id16: Int, ux: Float, uy: Float) {
+        flashId[flashNext] = id16
+        flashUntil[flashNext] = steps + FLASH_STEPS
+        flashNext = (flashNext + 1) % FLASHES
+        if (myHits < MY_HITS) {
+            myHitId[myHits] = id16
+            myHitDamage[myHits] = s.damage[me]
+            myHitSeq[myHits] = UNSENT
+            myHits++
+        }
+        val at = s.enemyIndex[id16]
+        if (at < 0) return
+        var hp = s.enemyHp[at]
+        if (hp == Float.POSITIVE_INFINITY) return
+        for (k in 0 until myHits) if (myHitId[k] == id16) hp -= myHitDamage[k]
+        if (hp > 0.001f) return
+        val e = view.enemies
+        for (j in 0 until e.count) {
+            if (e.id[j] != id16) continue
+            // Out of the way for the rest of this step's shots too.
+            e.hp[j] = 0f
+            view.events.add(Events.ENEMY_KILLED, e.type[j], e.x[j], e.y[j], ux, uy, e.angle[j], id16)
+            break
+        }
+        deadId[deadNext] = id16
+        deadUntil[deadNext] = steps + GUESS_STEPS
+        deadNext = (deadNext + 1) % GUESSES
+    }
+
+    /** Coins the player walks into vanish here at once and go to the host as pickups. */
+    private fun checkPickups() {
+        val c = view.coins
+        val reach = Balance.PLAYER_RADIUS + Balance.COIN_RADIUS + 2f
+        for (i in 0 until c.count) {
+            if (c.value[i] <= 0) continue
+            val dx = c.x[i] - pilot.x
+            val dy = c.y[i] - pilot.y
+            if (dx * dx + dy * dy >= reach * reach) continue
+            c.value[i] = 0
+            reports.pickup(c.id[i])
+            takenId[takenNext] = c.id[i]
+            takenUntil[takenNext] = steps + GUESS_STEPS
+            takenNext = (takenNext + 1) % GUESSES
+        }
+    }
+
+    /** The boss does not budge for anyone; walking into it pushes the player back out, here as on the host. */
+    private fun stayOutOfBoss() {
+        val e = view.enemies
+        for (j in 0 until e.count) {
+            val def = Bestiary.of(e.type[j])
+            if (!def.boss) continue
+            val reach = def.radius + Balance.PLAYER_RADIUS
+            val dx = pilot.x - e.x[j]
+            val dy = pilot.y - e.y[j]
+            val d2 = dx * dx + dy * dy
+            if (d2 >= reach * reach || d2 < 0.0001f) return
+            val d = sqrt(d2)
+            val r = Balance.PLAYER_RADIUS
+            pilot.place((e.x[j] + dx / d * reach).coerceIn(r, ARENA_W - r), (e.y[j] + dy / d * reach).coerceIn(r, ARENA_H - r))
+            return
+        }
+    }
+
+    private fun guessed(ids: IntArray, until: IntArray, id16: Int): Boolean {
+        for (k in 0 until GUESSES) if (ids[k] == id16 && until[k] > steps) return true
+        return false
+    }
+
+    /** The host's own word on a kill this phone already showed; true if it was ours to show. */
+    private fun settle(id16: Int): Boolean {
+        for (k in 0 until GUESSES) {
+            if (deadId[k] == id16 && deadUntil[k] > steps) {
+                deadUntil[k] = 0
+                return true
+            }
+        }
+        return false
+    }
+
+    private fun forgetGuesses() {
+        myHits = 0
+        deadUntil.fill(0)
+        takenUntil.fill(0)
     }
 
     private fun justHit(id16: Int): Boolean {

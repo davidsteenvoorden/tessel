@@ -29,7 +29,7 @@ class ProtocolTest {
 
     private fun roundTrip(w: World, outbox: Events = Events(), paused: Boolean = false, ready: Int = 0): Snapshot {
         val buf = Wire.buffer(MAX_MESSAGE * 2)
-        Protocol.writeSnapshot(buf, w, paused, false, ready, outbox, Events(), Events(), CLIENT)
+        Protocol.writeSnapshot(buf, w, paused, false, ready, outbox, Events(), Events(), CLIENT, Echo())
         val bytes = Wire.finish(buf)
         assertEquals(Wire.SNAPSHOT, Wire.typeOf(bytes))
         val s = Snapshot()
@@ -74,7 +74,7 @@ class ProtocolTest {
         val gone = Events()
         gone.add(Events.HOSTILE_GONE, 70_100)
         val buf = Wire.buffer(MAX_MESSAGE * 2)
-        Protocol.writeSnapshot(buf, w, false, false, 0, Events(), born, gone, CLIENT)
+        Protocol.writeSnapshot(buf, w, false, false, 0, Events(), born, gone, CLIENT, Echo())
         val s = Snapshot()
         Protocol.readSnapshot(Wire.open(Wire.finish(buf)), s)
         assertEquals(1, s.bornCount)
@@ -135,7 +135,7 @@ class ProtocolTest {
         val gone = Events(SNAPSHOT_SHOTS)
         repeat(SNAPSHOT_SHOTS) { gone.add(Events.HOSTILE_GONE, it) }
         val buf = Wire.buffer(MAX_MESSAGE * 2)
-        Protocol.writeSnapshot(buf, w, false, false, 0, outbox, born, gone, CLIENT)
+        Protocol.writeSnapshot(buf, w, false, false, 0, outbox, born, gone, CLIENT, Echo())
         assertTrue("worst case is ${buf.position()} bytes", buf.position() <= MAX_MESSAGE)
     }
 
@@ -175,11 +175,25 @@ class ProtocolTest {
             hit(65_000, 0.6f, -0.8f)
             hurt(1234)
             hurt(-1)
+            pickup(40_001)
         }
-        Protocol.writeInput(buf, sent, 345.5f, 678.25f, told)
+        val timing = Echo().apply {
+            seq = 812
+            stamp = 123_456
+            echo = 123_000
+            held = 7
+        }
+        Protocol.writeInput(buf, sent, 345.5f, 678.25f, told, timing)
         val got = PlayerInput()
         val heard = Reports()
-        Protocol.readInput(Wire.open(Wire.finish(buf)), got, heard)
+        val back = Echo()
+        Protocol.readInput(Wire.open(Wire.finish(buf)), got, heard, back)
+        assertEquals(812, back.seq)
+        assertEquals(123_456, back.stamp)
+        assertEquals(123_000, back.echo)
+        assertEquals(7, back.held)
+        assertEquals(1, heard.pickups)
+        assertEquals(40_001, heard.pickupId[0])
         assertEquals(1, heard.hits)
         assertEquals(65_000, heard.hitId[0])
         assertEquals(-0.8f, heard.hitY[0], 0.01f)
@@ -211,6 +225,32 @@ class ProtocolTest {
         assertEquals(-1, map[5])
         map.clear()
         assertEquals(-1, map[977])
+    }
+
+    @Test
+    fun enemyHealthAndKillIdsTravelSoAPhoneCanCallItsOwnKills() {
+        val w = busyWorld()
+        val boss = w.spawnEnemy(Bestiary.HEXARCH, 800f, 300f)
+        val outbox = Events()
+        outbox.add(Events.ENEMY_KILLED, Bestiary.DOT, 10f, 10f, 0f, 0f, 0f, 70_123)
+        val s = roundTrip(w, outbox)
+        for (i in 0 until w.enemies.count) {
+            val expected = if (i == boss) Float.POSITIVE_INFINITY else w.enemies.hp[i]
+            if (expected.isInfinite()) assertTrue(s.enemyHp[i].isInfinite()) else assertEquals(expected, s.enemyHp[i], 0.07f)
+        }
+        assertEquals(70_123 and 0xFFFF, s.events.ref[0])
+        assertEquals(w.players.damage(CLIENT), s.damage[CLIENT], 0f)
+    }
+
+    @Test
+    fun theRoundTripLeavesOutTimeSpentWaiting() {
+        // Sent at 1000, the other side held it 30 ms, the reply arrives at 1110: 80 ms on the wire.
+        val e = Echo().apply {
+            echo = 1000
+            held = 30
+        }
+        assertEquals(80, e.roundTrip(1110))
+        assertEquals(-1, Echo().roundTrip(5000))
     }
 
     private companion object {

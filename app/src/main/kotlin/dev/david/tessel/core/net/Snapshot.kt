@@ -36,6 +36,9 @@ class Snapshot {
     /** Arrival order on this phone; the host's tick can repeat while it is paused. */
     var seq = 0L
 
+    /** The host's timing, for the round trip, and the last input number it acted on. */
+    val echo = Echo()
+
     val px = FloatArray(MAX_PLAYERS)
     val py = FloatArray(MAX_PLAYERS)
     val aimX = FloatArray(MAX_PLAYERS)
@@ -57,6 +60,7 @@ class Snapshot {
     val bulletSpeed = FloatArray(MAX_PLAYERS)
     val range = FloatArray(MAX_PLAYERS)
     val bulletRadius = FloatArray(MAX_PLAYERS)
+    val damage = FloatArray(MAX_PLAYERS)
     val volley = IntArray(MAX_PLAYERS)
     val pierce = IntArray(MAX_PLAYERS)
 
@@ -68,6 +72,9 @@ class Snapshot {
     val enemyFlash = BooleanArray(MAX_ENEMIES)
     val enemyCue = FloatArray(MAX_ENEMIES)
     val enemyAngle = FloatArray(MAX_ENEMIES)
+
+    /** Health left; infinite for a boss, whose fall this phone never guesses. */
+    val enemyHp = FloatArray(MAX_ENEMIES)
     val enemyIndex = IdMap(1024)
 
     // Enemy shots fired since the snapshot before, and ones used up.

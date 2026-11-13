@@ -27,6 +27,14 @@ class HostSession(private val world: World, private val send: (player: Int, byte
     private val born = Array(MAX_PLAYERS) { Events(SNAPSHOT_SHOTS) }
     private val gone = Array(MAX_PLAYERS) { Events(SNAPSHOT_SHOTS) }
     private val reports = Reports()
+    private val echoIn = Echo()
+    private val echoOut = Echo()
+
+    // Per player: their last input number and clock reading, when it came, and the measured round trip.
+    private val lastSeq = IntArray(MAX_PLAYERS)
+    private val lastStamp = IntArray(MAX_PLAYERS)
+    private val stampAt = IntArray(MAX_PLAYERS)
+    private val roundTrip = FloatArray(MAX_PLAYERS) { -1f }
     private val buf = Wire.buffer(MAX_MESSAGE * 2)
 
     /** Bit p set once player p pressed Ready in the shop. */
@@ -42,6 +50,9 @@ class HostSession(private val world: World, private val send: (player: Int, byte
 
     fun connect(player: Int) {
         linked = linked or (1 shl player)
+        lastSeq[player] = 0
+        lastStamp[player] = 0
+        roundTrip[player] = -1f
         outbox[player].clear()
         born[player].clear()
         gone[player].clear()
@@ -58,8 +69,15 @@ class HostSession(private val world: World, private val send: (player: Int, byte
         val buf = Wire.open(bytes)
         when (Wire.typeOf(bytes)) {
             Wire.INPUT -> {
-                Protocol.readInput(buf, remote[player], reports)
+                Protocol.readInput(buf, remote[player], reports, echoIn)
                 lastInputNanos[player] = nowNanos
+                val now = millis(nowNanos)
+                lastSeq[player] = echoIn.seq
+                lastStamp[player] = echoIn.stamp
+                stampAt[player] = now
+                val sample = echoIn.roundTrip(now)
+                if (sample >= 0) roundTrip[player] = smooth(roundTrip[player], sample)
+                for (k in 0 until reports.pickups) world.remotePickup(player, reports.pickupId[k])
                 for (k in 0 until reports.hits) world.remoteHit(player, reports.hitId[k], reports.hitX[k], reports.hitY[k])
                 for (k in 0 until reports.hurts) world.remoteHurt(player, reports.hurtBy[k])
             }
@@ -128,7 +146,12 @@ class HostSession(private val world: World, private val send: (player: Int, byte
         for (p in 1 until world.playerCount) {
             if (linked and (1 shl p) == 0) continue
             if (nowNanos - lastSentNanos[p] < SNAPSHOT_NANOS) continue
-            Protocol.writeSnapshot(buf, world, paused, waiting, ready, outbox[p], born[p], gone[p], p)
+            val now = millis(nowNanos)
+            echoOut.seq = lastSeq[p]
+            echoOut.stamp = now
+            echoOut.echo = lastStamp[p]
+            echoOut.held = if (lastStamp[p] == 0) 0 else now - stampAt[p]
+            Protocol.writeSnapshot(buf, world, paused, waiting, ready, outbox[p], born[p], gone[p], p, echoOut)
             if (send(p, Wire.finish(buf), true)) {
                 outbox[p].clear()
                 born[p].clear()
@@ -137,6 +160,9 @@ class HostSession(private val world: World, private val send: (player: Int, byte
             }
         }
     }
+
+    /** Round trip to [player]'s phone in milliseconds, smoothed, or -1 before it is known. */
+    fun roundTripMillis(player: Int): Int = roundTrip[player].toInt()
 
     /** Tells every other phone a fresh run has begun, and which player it is. */
     fun announceStart() {
@@ -151,6 +177,12 @@ class HostSession(private val world: World, private val send: (player: Int, byte
     }
 
     companion object {
+        /** A clock reading in milliseconds; never 0, which means "none yet" on the wire. */
+        fun millis(nanos: Long): Int = (nanos / 1_000_000L).toInt().let { if (it == 0) 1 else it }
+
+        /** Follows a measured round trip closely, but not every single bump. */
+        fun smooth(old: Float, sample: Int): Float = if (old < 0f) sample.toFloat() else old + (sample - old) * 0.2f
+
         /** 30 snapshots a second: small enough now that bullets do not travel. */
         const val SNAPSHOT_NANOS = 33_000_000L
         const val STALE_NANOS = 400_000_000L

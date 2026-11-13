@@ -21,7 +21,7 @@ import kotlin.math.abs
  */
 class CoopLoopTest {
     private val stepNanos = 1_000_000_000L / TICK_HZ
-    private val delayNanos = 40_000_000L
+    private var delayNanos = 40_000_000L
     private var now = 0L
 
     /** [to] is the player number of the receiving phone; the host is 0. */
@@ -89,7 +89,7 @@ class CoopLoopTest {
         for (c in clients) {
             val s = c.latest
             val playing = s != null && !s.paused && s.phase != Phase.SHOP && s.phase != Phase.OVER
-            if (playing) c.tick(sticks[c.me])
+            if (playing) c.tick(sticks[c.me], now)
             c.frame(now)
         }
     }
@@ -309,6 +309,61 @@ class CoopLoopTest {
         assertEquals(Phase.FIGHT, world.phase)
         assertEquals(2, world.stage)
         assertTrue(!world.players.present[3])
+    }
+
+    @Test
+    fun bothSidesMeasureTheRoundTrip() {
+        run(2f)
+        // 40 ms each way, give or take a frame for when things are read.
+        assertEquals(80f, client.roundTripMillis.toFloat(), 20f)
+        assertEquals(80f, host.roundTripMillis(CLIENT).toFloat(), 20f)
+    }
+
+    @Test
+    fun aKillShowsOnTheJoiningPhoneBeforeTheHostHasHeard() {
+        world.spawning = false
+        run(0.5f)
+        val dot = world.spawnEnemy(dev.david.tessel.core.content.Bestiary.DOT, world.players.x[CLIENT], world.players.y[CLIENT] - 150f)
+        val id16 = world.enemies.id[dot] and 0xFFFF
+        run(0.4f, hostDrivesBot = false)
+        clientStick.aimY = -1f
+        clientStick.fire = true
+        var shownAt = -1L
+        var hostAt = -1L
+        var shown = 0
+        repeat(TICK_HZ * 2) {
+            tick(hostDrivesBot = false)
+            val ev = client.view.events
+            for (i in 0 until ev.count) if (ev.kind[i] == Events.ENEMY_KILLED && ev.ref[i] == id16) {
+                shown++
+                if (shownAt < 0) shownAt = now
+            }
+            ev.clear()
+            var alive = false
+            for (i in 0 until world.enemies.count) if (world.enemies.id[i] and 0xFFFF == id16) alive = true
+            if (!alive && hostAt < 0) hostAt = now
+        }
+        assertTrue("the phone showed the kill", shownAt > 0)
+        assertTrue("the host agreed", hostAt > 0)
+        assertTrue("shown first", shownAt < hostAt)
+        assertEquals("shown once, not again when the host agreed", 1, shown)
+    }
+
+    @Test
+    fun aSlowLinkNeverPullsThePlayerBack() {
+        delayNanos = 300_000_000L
+        setUp(2)
+        world.spawning = false
+        run(1f)
+        clientStick.moveX = 1f
+        var last = client.view.players.x[CLIENT]
+        repeat(TICK_HZ * 3) {
+            tick(hostDrivesBot = false)
+            val x = client.view.players.x[CLIENT]
+            assertTrue("pulled back from $last to $x", x >= last - 0.01f)
+            last = x
+        }
+        assertTrue(last > 700f)
     }
 
     private companion object {

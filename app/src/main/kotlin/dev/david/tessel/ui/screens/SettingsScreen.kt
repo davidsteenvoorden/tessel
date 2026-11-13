@@ -129,6 +129,13 @@ fun SettingsScreen(
                         { v -> onChange { it.copy(showStats = v) } },
                         detail = "Frame time and enemy count along the bottom edge.",
                     )
+                    Divider()
+                    ToggleRow(
+                        "Connection readout",
+                        settings.showLink,
+                        { v -> onChange { it.copy(showLink = v) } },
+                        detail = "In co-op: how the phones are linked and the round trip, top right. Green is quick, amber is noticeable, red is slow.",
+                    )
                 }
 
                 Updates(updater)

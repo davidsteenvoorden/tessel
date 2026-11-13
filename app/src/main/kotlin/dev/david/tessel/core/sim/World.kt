@@ -298,6 +298,20 @@ class World(seed: Long = 1L) {
         }
     }
 
+    /** Player [p]'s phone saw them touch the coin whose id ends in [id16]. */
+    fun remotePickup(p: Int, id16: Int) {
+        if (!players.alive(p)) return
+        val c = coins
+        for (i in 0 until c.count) {
+            if (c.id[i] and 0xFFFF != id16 || c.value[i] <= 0) continue
+            players.coins[p] += c.value[i]
+            players.earned[p] += c.value[i]
+            events.add(Events.COIN, p, c.x[i], c.y[i])
+            c.value[i] = 0
+            return
+        }
+    }
+
     /** Player [p]'s phone saw them get hit, by the enemy shot whose id ends in [shot16], or by touch when it is -1. */
     fun remoteHurt(p: Int, shot16: Int) {
         if (phase != Phase.FIGHT && phase != Phase.CLEAR) return
@@ -571,7 +585,7 @@ class World(seed: Long = 1L) {
     private fun kill(j: Int, owner: Int, ux: Float, uy: Float) {
         val e = enemies
         val def = Bestiary.of(e.type[j])
-        events.add(Events.ENEMY_KILLED, e.type[j], e.x[j], e.y[j], ux, uy, e.angle[j])
+        events.add(Events.ENEMY_KILLED, e.type[j], e.x[j], e.y[j], ux, uy, e.angle[j], e.id[j])
         players.kills[owner]++
         val drops = if (def.coinChance >= 1f || rng.nextFloat() < def.coinChance) def.coins else 0
         val fling = if (def.boss) 260f else 150f
@@ -787,7 +801,7 @@ class World(seed: Long = 1L) {
     /** Sweeps the arena: stragglers vanish, loose coins go to the nearest player, the shop opens. */
     private fun openShop() {
         val e = enemies
-        for (i in 0 until e.count) events.add(Events.ENEMY_GONE, e.type[i], e.x[i], e.y[i], 0f, 0f, e.angle[i])
+        for (i in 0 until e.count) events.add(Events.ENEMY_GONE, e.type[i], e.x[i], e.y[i], 0f, 0f, e.angle[i], e.id[i])
         e.clear()
         boss = -1
         shownBossType = -1

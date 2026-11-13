@@ -92,6 +92,9 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
     private val roleFlow = MutableStateFlow(Role.SOLO)
     val role: StateFlow<Role> = roleFlow
 
+    // What carries each link, from Nearby: 0 unknown, 1 Bluetooth LE, 2 Bluetooth, 3 Wi-Fi. Written on the main thread.
+    private val linkQuality = IntArray(MAX_PLAYERS)
+
     /** True while the host holds the game for a phone that dropped out. */
     private val heldFlow = MutableStateFlow(false)
     val held: StateFlow<Boolean> = heldFlow
@@ -291,6 +294,11 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
         enter(Mode.HOME)
     }
 
+    /** The link to [player] (0 on a joining phone means the host) got faster or was just made. */
+    fun setLinkQuality(player: Int, quality: Int) {
+        if (player in 0 until MAX_PLAYERS) linkQuality[player] = quality
+    }
+
     fun applySettings(s: Settings) {
         controller.leftHanded = s.leftHanded
         controller.stickRadiusDp = s.stickSize.radiusDp
@@ -299,6 +307,7 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
         handler.post {
             renderer.stickRadius = controller.stickRadius
             renderer.showStats = s.showStats
+            hud.showLink = s.showLink
         }
     }
 
@@ -373,7 +382,7 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
             if (current == Mode.PLAYING) {
                 pendingNanos += usable
                 while (pendingNanos >= STEP_NANOS) {
-                    c.tick(inputs[0])
+                    c.tick(inputs[0], nowNanos)
                     pendingNanos -= STEP_NANOS
                 }
             } else {
@@ -381,6 +390,7 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
             }
             c.frame(nowNanos)
             react(c.view.events, now)
+            hud.link(c.roundTripMillis, linkQuality[0])
             shown = c.view
         } else {
             val h = host
@@ -406,6 +416,7 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
             }
             react(world.events, now)
             h?.pump(nowNanos, current == Mode.PAUSED, unreachable != 0)
+            if (h == null) hud.link(-1, -1) else showWorstLink(h)
             shown = world
         }
         shards.update(usable / 1e9f)
@@ -421,7 +432,7 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
                 } else {
                     renderer.draw(canvas, shown, blend, viewport, shards, moveView, aimView, me)
                     val inset = cutout
-                    hud.draw(canvas, shown, renderer.palette, inset.left, inset.top, me, now)
+                    hud.draw(canvas, shown, renderer.palette, inset.left, inset.top, inset.right, me, now)
                 }
             } finally {
                 holder.unlockCanvasAndPost(canvas)
@@ -524,6 +535,19 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
             if (wanted == Mode.PLAYING) restartClock()
             enter(wanted)
         }
+    }
+
+    /** The host shows its slowest link: that is the player who will feel it. */
+    private fun showWorstLink(h: HostSession) {
+        var trip = -1
+        var quality = 0
+        for (p in 1 until world.playerCount) {
+            if (h.linked and (1 shl p) == 0) continue
+            trip = maxOf(trip, h.roundTripMillis(p))
+            val q = linkQuality[p]
+            if (q != 0 && (quality == 0 || q < quality)) quality = q
+        }
+        hud.link(trip, quality)
     }
 
     private fun onPartnerAsk(kind: Int) {

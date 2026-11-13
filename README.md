@@ -22,7 +22,9 @@ One phone taps Host and gets a four-letter code. The others tap Join and pick th
 
 The phones talk to each other directly over Bluetooth and Wi-Fi using Google's Nearby Connections, so they need Google Play services, and Bluetooth and Wi-Fi switched on. Wi-Fi does not have to be connected to a network. More players means more enemies, and bosses with more health.
 
-Each phone decides for itself what its own shots hit and what hits it, judged against exactly what it shows. The host goes along with that, so on a slow link you never lose a shot you landed or take a hit you dodged.
+Each phone decides for itself what its own shots hit and what hits it, judged against exactly what it shows. The host goes along with that, so on a slow link you never lose a shot you landed or take a hit you dodged. Enemies you finish break the moment your shot lands, and coins you walk into are yours at once, without waiting for the host.
+
+In a co-op game the top right corner shows how the phones are linked and the round trip between them, for example "Wi-Fi 34 ms". Green is quick, amber is noticeable and red is slow; Bluetooth LE is always red, because it cannot keep up. If you see Bluetooth, switching Wi-Fi on for both phones usually helps. Settings can hide the readout.
 
 If a phone drops out, the game waits 20 seconds for it to come back. The host can also choose to play on without it.
 

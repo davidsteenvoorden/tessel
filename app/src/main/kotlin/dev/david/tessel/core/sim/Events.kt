@@ -15,10 +15,13 @@ class Events(private val capacity: Int = 512) {
     val dy = FloatArray(capacity)
     val angle = FloatArray(capacity)
 
+    /** The entity it is about, where that matters: an enemy's id for kills. */
+    val ref = IntArray(capacity)
+
     var count = 0
         private set
 
-    fun add(kind: Int, who: Int, x: Float = 0f, y: Float = 0f, dx: Float = 0f, dy: Float = 0f, angle: Float = 0f) {
+    fun add(kind: Int, who: Int, x: Float = 0f, y: Float = 0f, dx: Float = 0f, dy: Float = 0f, angle: Float = 0f, ref: Int = 0) {
         if (count == capacity) return
         val i = count++
         this.kind[i] = kind
@@ -28,6 +31,7 @@ class Events(private val capacity: Int = 512) {
         this.dx[i] = dx
         this.dy[i] = dy
         this.angle[i] = angle
+        this.ref[i] = ref
     }
 
     fun clear() {

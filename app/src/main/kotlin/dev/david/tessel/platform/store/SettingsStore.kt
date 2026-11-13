@@ -20,6 +20,8 @@ data class Settings(
     val vibration: Boolean = true,
     val shotVibration: Boolean = true,
     val showStats: Boolean = false,
+    /** Ping and link type in co-op, top right. */
+    val showLink: Boolean = true,
 )
 
 data class Best(val stage: Int, val seconds: Int)
@@ -51,6 +53,7 @@ class SettingsStore(context: Context) {
             .putBoolean(KEY_VIBRATION, next.vibration)
             .putBoolean(KEY_SHOT_VIBRATION, next.shotVibration)
             .putBoolean(KEY_STATS, next.showStats)
+            .putBoolean(KEY_LINK, next.showLink)
             .apply()
     }
 
@@ -74,6 +77,7 @@ class SettingsStore(context: Context) {
         vibration = prefs.getBoolean(KEY_VIBRATION, true),
         shotVibration = prefs.getBoolean(KEY_SHOT_VIBRATION, true),
         showStats = prefs.getBoolean(KEY_STATS, debuggable),
+        showLink = prefs.getBoolean(KEY_LINK, true),
     )
 
     private fun readRecords(): Records {
@@ -95,6 +99,7 @@ class SettingsStore(context: Context) {
         const val KEY_VIBRATION = "vibration"
         const val KEY_SHOT_VIBRATION = "shot_vibration"
         const val KEY_STATS = "show_stats"
+        const val KEY_LINK = "show_link"
         const val KEY_BEST_STAGE = "best_stage_"
         const val KEY_BEST_SECONDS = "best_seconds_"
     }

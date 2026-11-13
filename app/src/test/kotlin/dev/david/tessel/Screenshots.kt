@@ -136,7 +136,7 @@ class Screenshots {
             knobY = originY + scene.world.players.aimY[me] * 110f
         }
         scene.renderer.draw(canvas, scene.world, 1f, view, scene.shards, move, aim, me)
-        scene.hud.draw(canvas, scene.world, palette, 0, 0, me, 0L)
+        scene.hud.draw(canvas, scene.world, palette, 0, 0, 0, me, 0L)
         return bitmap
     }
 
@@ -183,7 +183,12 @@ class Screenshots {
         val scene = Scene(players = 4, stage = 12, seed = 412, palette = Palette.Light, density = density)
         scene.play(22f)
         settle(scene)
+        // The host's readout: its slowest link, over Wi-Fi.
+        scene.hud.link(34, 3)
         save(draw(scene, Palette.Light, me = 0), "team.png")
+        // And how a slow Bluetooth link reads, for checking rather than the README.
+        scene.hud.link(180, 2)
+        save(draw(scene, Palette.Light, me = 0), "slow-link.png", checks)
     }
 
     @Test

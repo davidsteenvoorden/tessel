@@ -127,7 +127,7 @@ class Pilot {
                 val sy = shots.y[i] - ay
                 val len2 = (sx * sx + sy * sy).coerceAtLeast(0.0001f)
                 for (j in 0 until e.count) {
-                    if (e.id[j] == shots.lastHit[i]) continue
+                    if (e.id[j] == shots.lastHit[i] || e.hp[j] <= 0f) continue
                     val reach = shots.radius[i] + Bestiary.of(e.type[j]).radius
                     // Closest point of this step's path to the enemy's centre.
                     val along = (((e.x[j] - ax) * sx + (e.y[j] - ay) * sy) / len2).coerceIn(0f, 1f)

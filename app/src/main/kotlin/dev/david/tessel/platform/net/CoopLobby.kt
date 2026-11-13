@@ -1,5 +1,6 @@
 package dev.david.tessel.platform.net
 
+import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -99,6 +100,17 @@ class CoopLobby(private val activity: ComponentActivity, private val game: GameS
     private val found = LinkedHashMap<String, FoundGame>()
 
     private val tap = TapReader(activity) { result -> onTap(result) }
+
+    /**
+     * Phone Wi-Fi naps between packets to save power, which adds delay in
+     * spikes. While linked to another phone, this asks Android to keep it
+     * awake (on Android 10 and later; older ones get the high-performance mode).
+     */
+    @Suppress("DEPRECATION")
+    private val wifiLock = activity.applicationContext.getSystemService(WifiManager::class.java)?.createWifiLock(
+        if (Build.VERSION.SDK_INT >= 29) WifiManager.WIFI_MODE_FULL_LOW_LATENCY else WifiManager.WIFI_MODE_FULL_HIGH_PERF,
+        "Tessel co-op",
+    )?.apply { setReferenceCounted(false) }
 
     init {
         TapInbox.name = myName
@@ -348,6 +360,7 @@ class CoopLobby(private val activity: ComponentActivity, private val game: GameS
                 s.endpoint = endpointId
                 s.connected = true
                 s.inFlight = 0L
+                updateTap()
                 if (playing) {
                     waiting.remove(seat)?.let { main.removeCallbacks(it) }
                     game.linkRestored(seat)
@@ -390,6 +403,7 @@ class CoopLobby(private val activity: ComponentActivity, private val game: GameS
                 val s = seats[seat] ?: return
                 s.connected = false
                 s.endpoint = null
+                updateTap()
                 if (playing) {
                     // Hold the game for a while in case the phone comes back.
                     val giveUp = Runnable { giveUpOn(seat) }
@@ -407,6 +421,7 @@ class CoopLobby(private val activity: ComponentActivity, private val game: GameS
             }
             if (endpointId != hostEndpoint) return
             hostEndpoint = null
+            updateTap()
             if (playing) {
                 reconnecting = true
                 stateFlow.value = LobbyState.Reconnecting(listOf(hostName), host = false)
@@ -420,6 +435,13 @@ class CoopLobby(private val activity: ComponentActivity, private val game: GameS
 
         override fun onBandwidthChanged(endpointId: String, info: BandwidthInfo) {
             Log.d(TAG, "link quality ${info.quality}")
+            val quality = when (info.quality) {
+                BandwidthInfo.Quality.HIGH -> 3
+                BandwidthInfo.Quality.MEDIUM -> 2
+                BandwidthInfo.Quality.LOW -> 1
+                else -> 0
+            }
+            game.setLinkQuality(if (hosting) seatOf(endpointId) else 0, quality)
         }
     }
 
@@ -506,6 +528,9 @@ class CoopLobby(private val activity: ComponentActivity, private val game: GameS
     // NFC. The host reads; everyone else can be read while they are not busy in a run.
 
     private fun updateTap() {
+        val linked = hostEndpoint != null || seats.any { it?.connected == true }
+        wifiLock?.let { if (linked && resumed) it.acquire() else if (it.isHeld) it.release() }
+
         val canRead = resumed && hosting && !playing
         tap.set(canRead, code, myName)
         val canAnswer = resumed && !hosting && !playing && hostEndpoint == null

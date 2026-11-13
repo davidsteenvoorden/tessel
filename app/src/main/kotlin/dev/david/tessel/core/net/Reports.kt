@@ -17,7 +17,12 @@ class Reports {
     var hurts = 0
         private set
 
-    val isEmpty get() = hits == 0 && hurts == 0
+    /** Low 16 bits of coins the player walked into. */
+    val pickupId = IntArray(MAX_PICKUPS)
+    var pickups = 0
+        private set
+
+    val isEmpty get() = hits == 0 && hurts == 0 && pickups == 0
 
     fun hit(enemy16: Int, ux: Float, uy: Float) {
         if (hits == MAX_HITS) return
@@ -32,13 +37,20 @@ class Reports {
         hurtBy[hurts++] = shot16
     }
 
+    fun pickup(coin16: Int) {
+        if (pickups == MAX_PICKUPS) return
+        pickupId[pickups++] = coin16
+    }
+
     fun clear() {
         hits = 0
         hurts = 0
+        pickups = 0
     }
 
     companion object {
         const val MAX_HITS = 96
         const val MAX_HURTS = 8
+        const val MAX_PICKUPS = 32
     }
 }

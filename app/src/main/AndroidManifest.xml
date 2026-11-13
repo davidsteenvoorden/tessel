@@ -3,6 +3,8 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- Keeps Wi-Fi out of power save during a co-op game, for a steadier link. -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <!-- Updates: only used when the player taps Check for Updates in Settings. -->
     <uses-permission android:name="android.permission.INTERNET" />
