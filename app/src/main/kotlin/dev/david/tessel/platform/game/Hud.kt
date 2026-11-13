@@ -57,7 +57,8 @@ class Hud(private val density: Float, fontScale: Float) {
     /**
      * The co-op link for the readout: round trip in milliseconds (-1 while
      * unknown) and what carries it (0 unknown, 1 Bluetooth LE, 2 Bluetooth,
-     * 3 Wi-Fi). A [quality] of -1 means no link at all, so nothing shows.
+     * 3 Wi-Fi through Nearby, 4 straight over the local network). A [quality]
+     * of -1 means no link at all, so nothing shows.
      */
     fun link(roundTrip: Int, quality: Int) {
         linkTrip = roundTrip
@@ -113,6 +114,7 @@ class Hud(private val density: Float, fontScale: Float) {
     private fun drawLink(canvas: Canvas, palette: Palette, insetTop: Int, insetRight: Int) {
         if (!showLink || linkQuality < 0) return
         val label = when (linkQuality) {
+            4 -> "Direct"
             3 -> "Wi-Fi"
             2 -> "Bluetooth"
             1 -> "Bluetooth LE"

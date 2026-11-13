@@ -28,19 +28,24 @@ private const val RING = 16
 private const val STEP_NANOS = 1_000_000_000L / TICK_HZ
 
 /**
- * Drawing runs this far behind the host so there is usually a snapshot on each
- * side of "now". It follows how often snapshots actually arrive: about one and
- * a half gaps, never under 50 ms or over 220 ms.
+ * Drawing runs this far behind the host so the next snapshot is nearly always
+ * here already: one snapshot gap, plus how late the late ones get ([Jitter]),
+ * plus a little. Never under 40 ms or over 220 ms.
  */
-private const val MIN_DELAY_NANOS = 50_000_000L
+private const val MIN_DELAY_NANOS = 40_000_000L
 private const val MAX_DELAY_NANOS = 220_000_000L
-private const val FIRST_GAP_NANOS = 33_000_000L
+private const val FIRST_DELAY_NANOS = 80_000_000L
+private const val DELAY_MARGIN_NANOS = 5_000_000L
 
-/** Lets the clock estimate drift upward when the link gets slower. */
-private const val CREEP_NANOS = 250_000L
+/**
+ * The delay eases toward its target by bending time: the world runs up to
+ * 15% slow while it grows and 4% fast while it shrinks, instead of jumping.
+ */
+private const val GROW_PERCENT = 15L
+private const val SHRINK_PERCENT = 4L
 
-/** Snapshots this much later than expected, several in a row, mean the host clock jumped (pause, restart). */
-private const val RESYNC_NANOS = 250_000_000L
+/** About two seconds of snapshots. */
+private const val JITTER_WINDOW = 64
 /**
  * This phone moves its own player and the host follows, so it never pulls the
  * player back just because the host's copy is a round trip behind. Only a gap
@@ -80,12 +85,12 @@ class ClientSession(val me: Int, private var players: Int, private val send: (By
     private val ring = Array(RING) { Snapshot() }
     private var newest = -1
     private var stored = 0
-    private var offsetNanos = Long.MAX_VALUE
-    private var lateCount = 0
+    private val jitter = Jitter(JITTER_WINDOW)
     private var arrivals = 0L
     private var eventsThrough = 0L
-    private var lastArrival = 0L
-    private var gapNanos = FIRST_GAP_NANOS
+    private var gapTicks = 2f
+    private var delay = FIRST_DELAY_NANOS
+    private var lastFrameNanos = 0L
     private val pilot = Pilot()
     private val buf = Wire.buffer(1024)
     private val reports = Reports()
@@ -129,15 +134,25 @@ class ClientSession(val me: Int, private var players: Int, private val send: (By
     val roundTripMillis: Int get() = roundTrip.toInt()
 
     /** How far behind the host the drawing runs right now, in nanoseconds. */
-    val delayNanos: Long get() = (gapNanos * 3 / 2 + 12_000_000L).coerceIn(MIN_DELAY_NANOS, MAX_DELAY_NANOS)
+    val delayNanos: Long get() = delay
+
+    /** Where [delayNanos] is heading: one snapshot gap plus how late the late ones get. */
+    val targetDelayNanos: Long
+        get() = ((gapTicks * STEP_NANOS).toLong() + jitter.spreadNanos + DELAY_MARGIN_NANOS).coerceIn(MIN_DELAY_NANOS, MAX_DELAY_NANOS)
+
+    /** How late the late snapshots get, in milliseconds. */
+    val spreadMillis: Int get() = (jitter.spreadNanos / 1_000_000L).toInt()
+
+    /** Frames drawn with no newer snapshot to blend toward, so the world stood still. Counts up. */
+    var starvedFrames = 0
+        private set
 
     fun reset() {
         newest = -1
         stored = 0
-        offsetNanos = Long.MAX_VALUE
-        lateCount = 0
+        jitter.reset()
         eventsThrough = arrivals
-        lastArrival = 0L
+        gapTicks = 2f
         pilot.reset()
         drift.clear()
         ghosts.clear()
@@ -162,7 +177,7 @@ class ClientSession(val me: Int, private var players: Int, private val send: (By
             // A new run on the host: the old snapshots belong to a different game.
             stored = 0
             eventsThrough = s.seq - 1
-            offsetNanos = Long.MAX_VALUE
+            jitter.reset()
             pilot.reset()
             drift.clear()
             ghosts.clear()
@@ -195,24 +210,11 @@ class ClientSession(val me: Int, private var players: Int, private val send: (By
         // The host sweeps every enemy shot away when the shop opens.
         if (s.phase == Phase.SHOP || s.phase == Phase.OVER) drift.clear()
 
-        if (lastArrival != 0L) {
-            val gap = (nowNanos - lastArrival).coerceAtMost(MAX_DELAY_NANOS)
-            gapNanos = (gapNanos * 7 + gap) / 8
+        // How many host ticks apart snapshots are, on average (two at 30 a second).
+        if (previous != null && s.tick > previousTick && stored > 1) {
+            gapTicks += ((s.tick - previousTick).coerceAtMost(12) - gapTicks) / 8f
         }
-        lastArrival = nowNanos
-
-        val sample = nowNanos - s.tick * STEP_NANOS
-        if (offsetNanos == Long.MAX_VALUE) {
-            offsetNanos = sample
-        } else if (sample - offsetNanos > RESYNC_NANOS) {
-            if (++lateCount >= 5) {
-                offsetNanos = sample
-                lateCount = 0
-            }
-        } else {
-            lateCount = 0
-            offsetNanos = minOf(sample, offsetNanos + CREEP_NANOS)
-        }
+        jitter.add(nowNanos, s.tick * STEP_NANOS)
     }
 
     /** One 60 Hz step of the local player. Sends its input every step. */
@@ -266,8 +268,13 @@ class ClientSession(val me: Int, private var players: Int, private val send: (By
     /** Fills [view] for drawing at [nowNanos]. */
     fun frame(nowNanos: Long) {
         val top = latest ?: return
-        renderTick = if (offsetNanos == Long.MAX_VALUE) top.tick.toFloat()
-        else (nowNanos - delayNanos - offsetNanos).toFloat() / STEP_NANOS
+        val target = targetDelayNanos
+        val dt = if (lastFrameNanos == 0L) 0L else (nowNanos - lastFrameNanos).coerceIn(0L, 100_000_000L)
+        lastFrameNanos = nowNanos
+        delay = if (target > delay) minOf(target, delay + dt * GROW_PERCENT / 100) else maxOf(target, delay - dt * SHRINK_PERCENT / 100)
+        val offset = jitter.offsetNanos
+        renderTick = if (offset == Long.MAX_VALUE) top.tick.toFloat()
+        else (nowNanos - delay - offset).toFloat() / STEP_NANOS
 
         // a: newest snapshot at or before the render time. b: the one after it, if any.
         var a: Snapshot? = null
@@ -284,6 +291,7 @@ class ClientSession(val me: Int, private var players: Int, private val send: (By
             a = b ?: top
             b = null
         }
+        if (b == null && !top.paused && (top.phase == Phase.FIGHT || top.phase == Phase.CLEAR)) starvedFrames++
         val t = if (b == null || b.tick == a.tick) 0f else ((renderTick - a.tick) / (b.tick - a.tick)).coerceIn(0f, 1f)
         val from = a
         val to = b ?: a

@@ -14,6 +14,10 @@ const val HOST_PLAYER = 0
  * or get hit by, applies their shop choices and sends each of them what to
  * draw, 30 times a second.
  *
+ * Each other phone says where its player is, every frame. Those reports
+ * arrive unevenly, so the host plays them back a little late, at an even
+ * pace, the same way the other phones draw the host's world.
+ *
  * [send] returns false when a latest-state message was skipped because the
  * previous one to that player is still on its way; the events it carried are
  * kept for the next.
@@ -22,7 +26,7 @@ class HostSession(private val world: World, private val send: (player: Int, byte
     private val remote = Array(MAX_PLAYERS) { PlayerInput() }
     private val quiet = PlayerInput()
     private val lastInputNanos = LongArray(MAX_PLAYERS)
-    private val lastSentNanos = LongArray(MAX_PLAYERS)
+    private val nextSendNanos = LongArray(MAX_PLAYERS)
     private val outbox = Array(MAX_PLAYERS) { Events(512) }
     private val born = Array(MAX_PLAYERS) { Events(SNAPSHOT_SHOTS) }
     private val gone = Array(MAX_PLAYERS) { Events(SNAPSHOT_SHOTS) }
@@ -36,6 +40,10 @@ class HostSession(private val world: World, private val send: (player: Int, byte
     private val stampAt = IntArray(MAX_PLAYERS)
     private val roundTrip = FloatArray(MAX_PLAYERS) { -1f }
     private val buf = Wire.buffer(MAX_MESSAGE * 2)
+
+    // Per player: where their phone said they were, by that phone's clock, played back smoothly.
+    private val trail = Array(MAX_PLAYERS) { Trail() }
+    private val smoothed = Array(MAX_PLAYERS) { PlayerInput() }
 
     /** Bit p set once player p pressed Ready in the shop. */
     var ready = 0
@@ -56,7 +64,8 @@ class HostSession(private val world: World, private val send: (player: Int, byte
         outbox[player].clear()
         born[player].clear()
         gone[player].clear()
-        lastSentNanos[player] = 0L
+        nextSendNanos[player] = 0L
+        trail[player].reset()
     }
 
     fun disconnect(player: Int) {
@@ -71,6 +80,7 @@ class HostSession(private val world: World, private val send: (player: Int, byte
             Wire.INPUT -> {
                 Protocol.readInput(buf, remote[player], reports, echoIn)
                 lastInputNanos[player] = nowNanos
+                trail[player].add(echoIn.stamp, remote[player].posX, remote[player].posY, nowNanos)
                 val now = millis(nowNanos)
                 lastSeq[player] = echoIn.seq
                 lastStamp[player] = echoIn.stamp
@@ -95,14 +105,26 @@ class HostSession(private val world: World, private val send: (player: Int, byte
         }
     }
 
-    /** A player's input for this tick. If their phone has gone quiet, they stand still and stop firing. */
+    /**
+     * A player's input for this tick, with their position played back at an
+     * even pace. If their phone has gone quiet, they stand still and stop firing.
+     */
     fun remoteInput(player: Int, nowNanos: Long): PlayerInput {
         if (nowNanos - lastInputNanos[player] > STALE_NANOS) {
             quiet.clear()
             return quiet
         }
-        return remote[player]
+        val out = smoothed[player]
+        out.copyFrom(remote[player])
+        trail[player].play(nowNanos, out)
+        return out
     }
+
+    /** How far behind [player]'s own reports the host plays them back, in milliseconds. */
+    fun playbackMillis(player: Int): Int = (trail[player].bufferNanos / 1_000_000L).toInt()
+
+    /** How unevenly [player]'s reports arrive: the late ones are this late, in milliseconds. */
+    fun spreadMillis(player: Int): Int = (trail[player].jitter.spreadNanos / 1_000_000L).toInt()
 
     fun markReady(player: Int) {
         ready = ready or (1 shl player)
@@ -145,7 +167,8 @@ class HostSession(private val world: World, private val send: (player: Int, byte
     fun pump(nowNanos: Long, paused: Boolean, waiting: Boolean) {
         for (p in 1 until world.playerCount) {
             if (linked and (1 shl p) == 0) continue
-            if (nowNanos - lastSentNanos[p] < SNAPSHOT_NANOS) continue
+            // Due on an even beat, give or take a few milliseconds, so frame timing never turns two frames into three.
+            if (nowNanos < nextSendNanos[p] - SEND_SLACK_NANOS) continue
             val now = millis(nowNanos)
             echoOut.seq = lastSeq[p]
             echoOut.stamp = now
@@ -156,7 +179,8 @@ class HostSession(private val world: World, private val send: (player: Int, byte
                 outbox[p].clear()
                 born[p].clear()
                 gone[p].clear()
-                lastSentNanos[p] = nowNanos
+                val due = nextSendNanos[p] + SNAPSHOT_NANOS
+                nextSendNanos[p] = if (due < nowNanos) nowNanos + SNAPSHOT_NANOS else due
             }
         }
     }
@@ -170,7 +194,8 @@ class HostSession(private val world: World, private val send: (player: Int, byte
             outbox[p].clear()
             born[p].clear()
             gone[p].clear()
-            lastSentNanos[p] = 0L
+            nextSendNanos[p] = 0L
+            trail[p].reset()
             if (linked and (1 shl p) != 0) send(p, Wire.start(world.difficulty.ordinal, p, world.playerCount), false)
         }
         clearReady()
@@ -184,7 +209,8 @@ class HostSession(private val world: World, private val send: (player: Int, byte
         fun smooth(old: Float, sample: Int): Float = if (old < 0f) sample.toFloat() else old + (sample - old) * 0.2f
 
         /** 30 snapshots a second: small enough now that bullets do not travel. */
-        const val SNAPSHOT_NANOS = 33_000_000L
+        const val SNAPSHOT_NANOS = 1_000_000_000L / 30
+        const val SEND_SLACK_NANOS = 4_000_000L
         const val STALE_NANOS = 400_000_000L
     }
 }

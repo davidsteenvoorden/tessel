@@ -9,7 +9,7 @@ import java.nio.ByteOrder
  * layout below changes; mismatched phones then refuse each other politely.
  */
 object Wire {
-    const val VERSION = 4
+    const val VERSION = 5
 
     const val HELLO = 1
     const val START = 2
@@ -20,6 +20,18 @@ object Wire {
 
     /** Host to everyone in the lobby: who is in it. */
     const val ROSTER = 7
+
+    /** Host to a joining phone, through Nearby: where to reach it directly, and the token to say. */
+    const val DIRECT_OFFER = 8
+
+    /**
+     * Through Nearby, both ways: from here on my messages come through the
+     * direct pipe. Everything sent before it came through Nearby.
+     */
+    const val DIRECT_ON = 9
+
+    /** Joining phone to host, first thing through the direct pipe. */
+    const val DIRECT_HELLO = 10
 
     // Actions a client asks the host for.
     const val BUY = 1
@@ -134,6 +146,58 @@ object Wire {
         buf.put(arg.toByte())
         return finish(buf)
     }
+
+    class Offer(val token: Long, val port: Int, val addresses: List<java.net.Inet4Address>)
+
+    fun directOffer(token: Long, port: Int, addresses: List<java.net.Inet4Address>): ByteArray {
+        val list = addresses.take(MAX_OFFERED)
+        val buf = buffer(16 + list.size * 4)
+        begin(buf, DIRECT_OFFER)
+        buf.putLong(token)
+        buf.putShort(port.toShort())
+        buf.put(list.size.toByte())
+        for (a in list) buf.put(a.address)
+        return finish(buf)
+    }
+
+    fun readDirectOffer(bytes: ByteArray): Offer {
+        val buf = open(bytes)
+        val token = buf.long
+        val port = buf.short.toInt() and 0xFFFF
+        val n = buf.get().toInt().coerceIn(0, MAX_OFFERED)
+        val addresses = List(n) {
+            val raw = ByteArray(4)
+            buf.get(raw)
+            java.net.InetAddress.getByAddress(raw) as java.net.Inet4Address
+        }
+        return Offer(token, port, addresses)
+    }
+
+    fun directOn(token: Long): ByteArray {
+        val buf = buffer(12)
+        begin(buf, DIRECT_ON)
+        buf.putLong(token)
+        return finish(buf)
+    }
+
+    fun readDirectOn(bytes: ByteArray): Long = open(bytes).long
+
+    class Hello(val token: Long, val seat: Int)
+
+    fun directHello(token: Long, seat: Int): ByteArray {
+        val buf = buffer(13)
+        begin(buf, DIRECT_HELLO)
+        buf.putLong(token)
+        buf.put(seat.toByte())
+        return finish(buf)
+    }
+
+    fun readDirectHello(bytes: ByteArray): Hello {
+        val buf = open(bytes)
+        return Hello(buf.long, buf.get().toInt())
+    }
+
+    private const val MAX_OFFERED = 8
 
     fun bye(): ByteArray {
         val buf = buffer(4)

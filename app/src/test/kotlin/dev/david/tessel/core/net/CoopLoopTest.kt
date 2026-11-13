@@ -17,7 +17,9 @@ import kotlin.math.abs
 /**
  * A host and the phones that joined it, wired together in memory with a
  * fixed delay and stepped on one fake clock. Checks what each phone would
- * see of the others. Most tests use one joining phone; a few use three.
+ * see of the others. Most tests use one joining phone; a few use three. A few
+ * make the link uneven, the way a real one is: messages late by different
+ * amounts, or let through in bunches, but always in order.
  */
 class CoopLoopTest {
     private val stepNanos = 1_000_000_000L / TICK_HZ
@@ -28,6 +30,13 @@ class CoopLoopTest {
     private class Letter(val at: Long, val bytes: ByteArray, val from: Int, val to: Int)
 
     private val post = ArrayList<Letter>()
+
+    /** Extra delay for each host message on top of [delayNanos]. */
+    private var downJitter: () -> Long = { 0L }
+
+    /** When set, joining phones' messages are let through only on this beat, in a bunch. */
+    private var upBunch = 0L
+    private val lastAt = HashMap<Pair<Int, Int>, Long>()
     private var players = 2
     private val world = World(seed = 21)
     private lateinit var host: HostSession
@@ -49,7 +58,7 @@ class CoopLoopTest {
         players = count
         world.reset(players = count, seed = 21)
         for (p in 1 until count) world.remote[p] = true
-        host = HostSession(world) { to, bytes, _ -> post += Letter(now + delayNanos, bytes, HOST_PLAYER, to); true }
+        host = HostSession(world) { to, bytes, _ -> mail(bytes, HOST_PLAYER, to); true }
         for (p in 1 until count) host.connect(p)
         host.onRequest = { kind ->
             when (kind) {
@@ -58,8 +67,17 @@ class CoopLoopTest {
             }
         }
         clients = (1 until count).map { me ->
-            ClientSession(me, count) { bytes, _ -> post += Letter(now + delayNanos, bytes, me, HOST_PLAYER); true }.also { it.reset() }
+            ClientSession(me, count) { bytes, _ -> mail(bytes, me, HOST_PLAYER); true }.also { it.reset() }
         }
+    }
+
+    private fun mail(bytes: ByteArray, from: Int, to: Int) {
+        var at = now + delayNanos
+        if (from == HOST_PLAYER) at += downJitter() else if (upBunch > 0) at = (at + upBunch - 1) / upBunch * upBunch
+        // A link keeps its messages in order, however late they are.
+        at = maxOf(at, lastAt[from to to] ?: 0L)
+        lastAt[from to to] = at
+        post += Letter(at, bytes, from, to)
     }
 
     private fun deliver() {
@@ -364,6 +382,66 @@ class CoopLoopTest {
             last = x
         }
         assertTrue(last > 700f)
+    }
+
+    @Test
+    fun theHostSendsOnAnEvenBeatWhenFramesWobble() {
+        var sent = 0
+        val h = HostSession(world) { _, _, _ -> sent++; true }
+        h.connect(CLIENT)
+        val rng = java.util.Random(9)
+        for (frame in 0 until 180) {
+            val wobble = (rng.nextDouble() * 6_000_000 - 3_000_000).toLong()
+            h.pump(1_000_000_000L + frame * stepNanos + wobble, paused = false, waiting = false)
+        }
+        // Three seconds at 30 a second, not 25 because some gaps came out three frames long.
+        assertEquals(90f, sent.toFloat(), 1f)
+    }
+
+    @Test
+    fun theHostPlaysABunchedPartnerBackEvenly() {
+        world.spawning = false
+        // The joining phone's reports reach the host four at a time, as through Nearby.
+        upBunch = 4 * stepNanos
+        run(1f)
+        clientStick.moveX = 1f
+        run(1f)
+        val step = Balance.PLAYER_SPEED / TICK_HZ
+        var last = world.players.x[CLIENT]
+        var biggest = 0f
+        var still = 0
+        repeat(TICK_HZ / 2) {
+            tick(hostDrivesBot = false)
+            val x = world.players.x[CLIENT]
+            biggest = maxOf(biggest, x - last)
+            if (x - last < step * 0.25f) still++
+            last = x
+        }
+        assertTrue("moved ${biggest / step} steps in one tick", biggest < step * 1.6f)
+        assertTrue("stood still in $still ticks", still <= 1)
+    }
+
+    @Test
+    fun anUnevenLinkDoesNotFreezeTheJoiningPhonesWorld() {
+        val rng = java.util.Random(5)
+        downJitter = { (rng.nextDouble() * 70_000_000).toLong() }
+        run(4f)
+        val before = client.starvedFrames
+        run(3f)
+        val starved = client.starvedFrames - before
+        assertTrue("stood still in $starved of ${3 * TICK_HZ} frames", starved < 3 * TICK_HZ / 20)
+        assertTrue("the delay grew to cover it: ${client.delayNanos / 1_000_000} ms", client.delayNanos > 70_000_000L)
+    }
+
+    @Test
+    fun anEvenLinkKeepsTheDelayShort() {
+        delayNanos = 10_000_000L
+        setUp(2)
+        run(4f)
+        assertTrue("${client.delayNanos / 1_000_000} ms behind", client.delayNanos <= 45_000_000L)
+        val before = client.starvedFrames
+        run(2f)
+        assertEquals(0, client.starvedFrames - before)
     }
 
     private companion object {

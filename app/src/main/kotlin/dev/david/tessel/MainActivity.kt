@@ -1,5 +1,6 @@
 package dev.david.tessel
 
+import android.content.pm.ApplicationInfo
 import android.os.Bundle
 import android.view.KeyEvent
 import android.view.MotionEvent
@@ -9,6 +10,7 @@ import androidx.compose.ui.platform.ComposeView
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import dev.david.tessel.core.sim.Bot
 import dev.david.tessel.platform.game.GameSurfaceView
 import dev.david.tessel.platform.game.Mode
 import dev.david.tessel.platform.game.StressRig
@@ -35,6 +37,9 @@ class MainActivity : ComponentActivity() {
         val stress = intent.getBooleanExtra("stress", false)
         val loopback = intent.getBooleanExtra("loopback", false)
         if (stress) game.stress = StressRig()
+        val debuggable = applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
+        if (debuggable && intent.getBooleanExtra("bot", false)) game.autopilot = Bot()
+        if (debuggable && intent.getBooleanExtra("nodirect", false)) lobby.directAllowed = false
         val onStart: (() -> Unit)? = when {
             loopback -> game::startLoopback
             stress || intent.getBooleanExtra("autostart", false) -> { { game.startRun(store.settings.value.difficulty) } }

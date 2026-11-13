@@ -25,6 +25,7 @@ import dev.david.tessel.core.net.HOST_PLAYER
 import dev.david.tessel.core.net.HostSession
 import dev.david.tessel.core.net.Snapshot
 import dev.david.tessel.core.net.Wire
+import dev.david.tessel.core.sim.Bot
 import dev.david.tessel.core.sim.Events
 import dev.david.tessel.core.sim.MAX_PLAYERS
 import dev.david.tessel.core.sim.Phase
@@ -83,6 +84,12 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
             field = if (debuggable) value else null
         }
 
+    /** Debug builds: a bot plays this phone's player, so a two-phone test can run hands-free. */
+    var autopilot: Bot? = null
+        set(value) {
+            field = if (debuggable) value else null
+        }
+
     private val modeFlow = MutableStateFlow(Mode.HOME)
     val mode: StateFlow<Mode> = modeFlow
     private val shopFlow = MutableStateFlow<ShopView?>(null)
@@ -94,6 +101,9 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
 
     // What carries each link, from Nearby: 0 unknown, 1 Bluetooth LE, 2 Bluetooth, 3 Wi-Fi. Written on the main thread.
     private val linkQuality = IntArray(MAX_PLAYERS)
+
+    // Links that skip Nearby and go straight over the local network. Written on the main thread.
+    private val direct = BooleanArray(MAX_PLAYERS)
 
     /** True while the host holds the game for a phone that dropped out. */
     private val heldFlow = MutableStateFlow(false)
@@ -124,6 +134,7 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
     private var lastFrameNanos = 0L
     private var pendingNanos = 0L
     private var statWindows = 0
+    private var nextNetLog = 0L
     @Volatile private var cutout = Insets.NONE
 
     init {
@@ -299,6 +310,14 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
         if (player in 0 until MAX_PLAYERS) linkQuality[player] = quality
     }
 
+    /** The link to [player] now goes straight over the local network, or no longer does. */
+    fun setDirect(player: Int, on: Boolean) {
+        if (player in 0 until MAX_PLAYERS) direct[player] = on
+    }
+
+    /** For the readout: 4 for a direct link, otherwise what Nearby reported. */
+    private fun qualityOf(player: Int) = if (direct[player]) 4 else linkQuality[player]
+
     fun applySettings(s: Settings) {
         controller.leftHanded = s.leftHanded
         controller.stickRadiusDp = s.stickSize.radiusDp
@@ -373,9 +392,10 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
 
         controller.read(inputs[0], moveView, aimView, now)
         gamepad.apply(inputs[0])
+        val c = client
+        autopilot?.drive(if (playingAs == Role.CLIENT && c != null) c.view else world, me, inputs[0])
         val simStart = System.nanoTime()
         val shown: World
-        val c = client
         if (playingAs == Role.CLIENT && c != null) {
             loopback?.frame(usable, nowNanos)
             followHost(c)
@@ -390,7 +410,7 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
             }
             c.frame(nowNanos)
             react(c.view.events, now)
-            hud.link(c.roundTripMillis, linkQuality[0])
+            hud.link(c.roundTripMillis, qualityOf(0))
             shown = c.view
         } else {
             val h = host
@@ -437,6 +457,11 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
             } finally {
                 holder.unlockCanvasAndPost(canvas)
             }
+        }
+
+        if (playingAs != Role.SOLO && nowNanos >= nextNetLog) {
+            nextNetLog = nowNanos + NET_LOG_NANOS
+            logNet()
         }
 
         if (stats.record(elapsed, drawStart - simStart, System.nanoTime() - drawStart)) {
@@ -537,6 +562,25 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
         }
     }
 
+    /**
+     * Every two seconds in co-op, one line on how the link is doing, so a
+     * slow game can be looked into afterwards with logcat.
+     */
+    private fun logNet() {
+        val c = client
+        val h = host
+        if (playingAs == Role.CLIENT && c != null) {
+            Log.d(TAG, "net client via=${if (direct[0]) "direct" else "nearby"} rtt=${c.roundTripMillis} spread=${c.spreadMillis} " +
+                "delay=${c.delayNanos / 1_000_000} target=${c.targetDelayNanos / 1_000_000} starved=${c.starvedFrames} mode=$current")
+        } else if (h != null) {
+            for (p in 1 until world.playerCount) {
+                if (h.linked and (1 shl p) == 0) continue
+                Log.d(TAG, "net host p=$p via=${if (direct[p]) "direct" else "nearby"} rtt=${h.roundTripMillis(p)} " +
+                    "spread=${h.spreadMillis(p)} playback=${h.playbackMillis(p)} mode=$current")
+            }
+        }
+    }
+
     /** The host shows its slowest link: that is the player who will feel it. */
     private fun showWorstLink(h: HostSession) {
         var trip = -1
@@ -544,7 +588,7 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
         for (p in 1 until world.playerCount) {
             if (h.linked and (1 shl p) == 0) continue
             trip = maxOf(trip, h.roundTripMillis(p))
-            val q = linkQuality[p]
+            val q = qualityOf(p)
             if (q != 0 && (quality == 0 || q < quality)) quality = q
         }
         hud.link(trip, quality)
@@ -731,6 +775,7 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
         const val MAX_CATCH_UP_NANOS = 100_000_000L
         const val EDGE_STRIP_DP = 48f
         const val LOG_EVERY_WINDOWS = 10
+        const val NET_LOG_NANOS = 2_000_000_000L
         const val LOOPBACK_DELAY_MS = 35L
     }
 }
