@@ -12,6 +12,8 @@ New kinds of enemy keep turning up as the stages go by: ones that keep their dis
 
 Stage 5 brings the first boss, and another follows every five stages. After the fourth the line starts over, with tougher versions.
 
+There are four difficulties. Easy is for your first runs: slower and softer enemies, slower shots, ten health where Normal gives eight, more coins, and bosses with less than half their usual health. Normal is a fair fight. Hard and Impossible take all of that the other way.
+
 ![The Gyre, the boss at stage 20](docs/boss.png)
 
 ## Playing together
@@ -20,7 +22,13 @@ One phone taps Host and gets a four-letter code. The others tap Join and pick th
 
 The phones talk to each other directly over Bluetooth and Wi-Fi using Google's Nearby Connections, so they need Google Play services, and Bluetooth and Wi-Fi switched on. Wi-Fi does not have to be connected to a network. More players means more enemies, and bosses with more health.
 
+Each phone decides for itself what its own shots hit and what hits it, judged against exactly what it shows. The host goes along with that, so on a slow link you never lose a shot you landed or take a hit you dodged.
+
 If a phone drops out, the game waits 20 seconds for it to come back. The host can also choose to play on without it.
+
+## Controllers
+
+A Bluetooth or USB controller works alongside the touch sticks. The left stick moves, the right stick aims and fires, the right trigger fires wherever you last aimed, and Start pauses. In the menus the d-pad moves a ring from button to button and A presses it.
 
 ![Four players on one team, in the light appearance](docs/team.png)
 
@@ -28,7 +36,9 @@ If a phone drops out, the game waits 20 seconds for it to come back. The host ca
 
 ## Install
 
-Download `tesselv0.2.apk` from the [releases page](../../releases) and open it on your phone. Android will ask you to allow installs from your browser or file manager the first time. Tessel needs Android 8 or newer.
+Download the newest `tesselvX.Y.apk` from the [releases page](../../releases) and open it on your phone. Android will ask you to allow installs from your browser or file manager the first time. Tessel needs Android 8 or newer.
+
+From version 0.3 on, Settings has an Updates section at the bottom. Check for Updates looks at this page and installs a newer version if there is one. That is the only time Tessel uses the internet.
 
 All phones in a game need the same version.
 
@@ -47,4 +57,4 @@ You need a JDK (17 or newer) and the Android SDK with platform 37.
 
 ## Known limits
 
-Co-op has been played on two phones (a Galaxy A71 and an A13). Games with more than two phones and the NFC tap have been tested in code but not yet on real hardware. There is no sound yet, only vibration. The pictures above were drawn on a computer by the game's own rendering code at the A71's resolution, not captured from a phone.
+Co-op has been played on two phones (a Galaxy A71 and an A13). Games with more than two phones, the NFC tap, controllers and the updater have been tested in code but not yet on real hardware. There is no sound yet, only vibration. The pictures above were drawn on a computer by the game's own rendering code at the A71's resolution, not captured from a phone.
