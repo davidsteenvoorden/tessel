@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The id is "F0" (private) followed by "Tessel" in ASCII; Tap.kt sends the same. -->
+<host-apdu-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:description="@string/tap_service"
+    android:requireDeviceUnlock="false">
+    <aid-group
+        android:category="other"
+        android:description="@string/tap_service">
+        <aid-filter android:name="F054657373656C" />
+    </aid-group>
+</host-apdu-service>

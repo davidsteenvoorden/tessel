@@ -1,0 +1,196 @@
+package dev.david.tessel.core.net
+
+import dev.david.tessel.core.content.Bestiary
+import dev.david.tessel.core.content.Difficulty
+import dev.david.tessel.core.sim.Events
+import dev.david.tessel.core.sim.MAX_PLAYERS
+import dev.david.tessel.core.sim.Phase
+import dev.david.tessel.core.sim.PlayerInput
+import dev.david.tessel.core.sim.World
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class ProtocolTest {
+    private val inputs = Array(MAX_PLAYERS) { PlayerInput() }
+
+    private fun busyWorld(): World {
+        val w = World(seed = 3)
+        w.reset(players = 2, seed = 3, difficulty = Difficulty.HARD)
+        repeat(40) { w.spawnEnemy(if (it % 3 == 0) Bestiary.SLAB else Bestiary.DOT, 100f + it * 30f, 50f + it * 10f) }
+        inputs[0].aimX = 1f
+        inputs[0].fire = true
+        inputs[1].aimX = -1f
+        inputs[1].fire = true
+        repeat(30) { w.step(inputs) }
+        return w
+    }
+
+    private fun roundTrip(w: World, outbox: Events = Events(), paused: Boolean = false, ready: Int = 0): Snapshot {
+        val buf = Wire.buffer(MAX_MESSAGE * 2)
+        Protocol.writeSnapshot(buf, w, paused, false, ready, outbox, CLIENT)
+        val bytes = Wire.finish(buf)
+        assertEquals(Wire.SNAPSHOT, Wire.typeOf(bytes))
+        val s = Snapshot()
+        Protocol.readSnapshot(Wire.open(bytes), s)
+        return s
+    }
+
+    @Test
+    fun theWorldSurvivesTheTripWithinQuantization() {
+        val w = busyWorld()
+        val s = roundTrip(w, paused = true, ready = 2)
+        assertEquals(w.tick, s.tick)
+        assertEquals(w.stage, s.stage)
+        assertEquals(w.phase, s.phase)
+        assertEquals(Difficulty.HARD, s.difficulty)
+        assertTrue(s.paused)
+        assertEquals(2, s.ready)
+        assertEquals(2, s.playerCount)
+        assertEquals(0b11, s.present)
+        for (p in 0 until w.playerCount) {
+            assertEquals(w.players.x[p], s.px[p], 0.13f)
+            assertEquals(w.players.hp[p], s.hp[p])
+            assertEquals(w.players.moveSpeed(p), s.moveSpeed[p], 0f)
+            assertEquals(w.players.volley(p), s.volley[p])
+        }
+        assertEquals(w.enemies.count, s.enemyCount)
+        for (i in 0 until w.enemies.count) {
+            assertEquals(w.enemies.id[i] and 0xFFFF, s.enemyId[i])
+            assertEquals(w.enemies.type[i], s.enemyType[i])
+            assertEquals(w.enemies.x[i], s.enemyX[i], 0.13f)
+            assertEquals(w.enemies.y[i], s.enemyY[i], 0.13f)
+            assertEquals(i, s.enemyIndex[w.enemies.id[i] and 0xFFFF])
+        }
+        assertEquals(w.coins.count, s.coinCount)
+    }
+
+    @Test
+    fun theClientsOwnBulletsAreLeftOut() {
+        val w = busyWorld()
+        val s = roundTrip(w)
+        var hostBullets = 0
+        for (i in 0 until w.bullets.count) if (w.bullets.owner[i] != CLIENT) hostBullets++
+        assertTrue(w.bullets.count > hostBullets)
+        assertEquals(hostBullets, s.bulletCount)
+    }
+
+    @Test
+    fun eventsRideAlong() {
+        val w = busyWorld()
+        val outbox = Events()
+        outbox.add(Events.ENEMY_KILLED, Bestiary.SLAB, 812.5f, 300f, 0.5f, -0.5f, 1f)
+        outbox.add(Events.RUN_OVER, 0)
+        val s = roundTrip(w, outbox)
+        assertEquals(2, s.events.count)
+        assertEquals(Events.ENEMY_KILLED, s.events.kind[0])
+        assertEquals(Bestiary.SLAB, s.events.who[0])
+        assertEquals(812.5f, s.events.x[0], 0.13f)
+        assertEquals(0.5f, s.events.dx[0], 0.01f)
+        assertEquals(Events.RUN_OVER, s.events.kind[1])
+    }
+
+    @Test
+    fun theShopTravelsOnlyWhileShopping() {
+        val w = World(seed = 9).apply { spawning = false }
+        w.reset(players = 2, seed = 9)
+        assertFalse(roundTrip(w).hasShop)
+        while (w.phase != Phase.SHOP) w.step(inputs.also { it[0].fire = false; it[1].fire = false })
+        w.players.coins[CLIENT] = 77
+        val s = roundTrip(w)
+        assertTrue(s.hasShop)
+        assertEquals(77, s.coins[CLIENT])
+        for (slot in 0 until 5) {
+            assertEquals(w.shop.item(CLIENT, slot), s.shopItem[slot])
+            assertEquals(w.shop.price(w, CLIENT, slot), s.shopPrice[slot])
+        }
+        assertEquals(w.shop.rerollPrice(w, CLIENT), s.rerollPrice)
+    }
+
+    @Test
+    fun aFullArenaForEightStillFitsInOneMessage() {
+        val w = World(seed = 4)
+        w.reset(players = MAX_PLAYERS, seed = 4)
+        // Every pool filled to the brim, every player in the snapshot.
+        while (w.enemies.add(w.enemies.count + 1, Bestiary.SLAB, 400f, 300f, 5f) >= 0) Unit
+        while (w.bullets.add(1, 10f, 10f, 700f, 0f, 30, 1f, 4f, 0, 0) >= 0) Unit
+        while (w.hostile.add(1, 10f, 10f, 200f, 0f, 30, 1f, 5f, 0, -1) >= 0) Unit
+        while (w.coins.add(w.coins.count + 1, 10f, 10f, 0f, 0f, 1) >= 0) Unit
+        val outbox = Events(2048)
+        repeat(2048) { outbox.add(Events.ENEMY_KILLED, Bestiary.DOT, 1f, 1f) }
+        val buf = Wire.buffer(MAX_MESSAGE * 2)
+        Protocol.writeSnapshot(buf, w, false, false, 0, outbox, CLIENT)
+        assertTrue("worst case is ${buf.position()} bytes", buf.position() <= MAX_MESSAGE)
+    }
+
+    @Test
+    fun enemyShotsAndTheBossTravel() {
+        val w = World(seed = 5).apply { spawning = false }
+        w.reset(players = 2, seed = 5)
+        val boss = w.spawnEnemy(Bestiary.HEXARCH, 800f, 300f)
+        w.enemies.hp[boss] = w.enemies.maxHp[boss] / 2
+        w.hostile.add(1, 300f, 200f, 120f, -60f, 30, 1f, 5f, 0, -1)
+        inputs.forEach { it.clear() }
+        w.step(inputs)
+        val s = roundTrip(w)
+        assertEquals(Bestiary.HEXARCH, s.bossType)
+        assertEquals(w.bossHealth(), s.bossHealth, 0.01f)
+        assertEquals(w.hostile.count, s.hostileCount)
+        assertEquals(w.hostile.x[0], s.hostileX[0], 0.13f)
+        assertEquals(120f, s.hostileVx[0], 1f)
+    }
+
+    @Test
+    fun startTellsEachPhoneWhoItIs() {
+        val start = Wire.readStart(Wire.start(Difficulty.HARD.ordinal, 3, 5))
+        assertEquals(Difficulty.HARD.ordinal, start.difficulty)
+        assertEquals(3, start.you)
+        assertEquals(5, start.players)
+        assertEquals(listOf("A71", "Pixel", "Tab"), Wire.readRoster(Wire.roster(listOf("A71", "Pixel", "Tab"))))
+    }
+
+    @Test
+    fun inputCarriesStickTriggerAndPosition() {
+        val buf = Wire.buffer(64)
+        val sent = PlayerInput().apply {
+            moveX = 0.5f
+            moveY = -1f
+            aimX = 0.6f
+            aimY = 0.8f
+            fire = true
+        }
+        Protocol.writeInput(buf, sent, 345.5f, 678.25f)
+        val got = PlayerInput()
+        Protocol.readInput(Wire.open(Wire.finish(buf)), got)
+        assertEquals(0.5f, got.moveX, 0.01f)
+        assertEquals(-1f, got.moveY, 0.01f)
+        assertEquals(0.8f, got.aimY, 0.01f)
+        assertTrue(got.fire)
+        assertTrue(got.hasPosition)
+        assertEquals(345.5f, got.posX, 0.13f)
+        assertEquals(678.25f, got.posY, 0.13f)
+    }
+
+    @Test
+    fun strangersAndOtherVersionsAreRecognised() {
+        assertEquals(-1, Wire.typeOf(byteArrayOf(1, 2, 3, 4)))
+        val other = Wire.hello("x").also { it[2] = (Wire.VERSION + 1).toByte() }
+        assertEquals(Wire.VERSION_MISMATCH, Wire.typeOf(other))
+        assertEquals("Galaxy A71", Wire.getString(Wire.open(Wire.hello("Galaxy A71"))))
+    }
+
+    @Test
+    fun idMapFindsWhatItHolds() {
+        val map = IdMap(64)
+        for (k in 0 until 40) map.put(k * 977, k)
+        for (k in 0 until 40) assertEquals(k, map[k * 977])
+        assertEquals(-1, map[5])
+        map.clear()
+        assertEquals(-1, map[977])
+    }
+
+    private companion object {
+        const val CLIENT = 1
+    }
+}

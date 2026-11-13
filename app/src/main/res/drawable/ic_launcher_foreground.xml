@@ -1,0 +1,27 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:translateX="1.24"
+        android:translateY="-0.39">
+        <path
+            android:fillColor="@color/icon_shard"
+            android:pathData="M51,57 L62.21,31.45 A24,24 0 0,1 73.66,67.77 Z" />
+    </group>
+    <group
+        android:translateX="-0.23"
+        android:translateY="1.28">
+        <path
+            android:fillColor="@color/icon_shard"
+            android:pathData="M51,57 L73.66,67.77 A24,24 0 0,1 30.82,60.21 Z" />
+    </group>
+    <group
+        android:translateX="-0.88"
+        android:translateY="-0.96">
+        <path
+            android:fillColor="@color/icon_facet"
+            android:pathData="M51,57 L30.82,60.21 A24,24 0 0,1 62.21,31.45 Z" />
+    </group>
+</vector>

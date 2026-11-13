@@ -1,0 +1,6 @@
+<resources>
+    <color name="ground">#ECEEF0</color>
+    <color name="icon_ground">#14171B</color>
+    <color name="icon_shard">#2BD2C2</color>
+    <color name="icon_facet">#8DE9DF</color>
+</resources>

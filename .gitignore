@@ -1,0 +1,16 @@
+/build/
+/app/build/
+.gradle/
+.kotlin/
+.idea/
+*.iml
+local.properties
+*.jks
+*.keystore
+captures/
+.externalNativeBuild/
+.cxx/
+
+# release signing and built APKs stay local
+keystore.properties
+/dist/
