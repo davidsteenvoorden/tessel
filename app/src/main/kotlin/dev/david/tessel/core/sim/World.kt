@@ -45,8 +45,6 @@ private const val MAGNET_ACCEL = 1800f
 private const val MAGNET_TOP_SPEED = 900f
 private const val TWO_PI = (2 * PI).toFloat()
 
-/** A shot has to reach this far into the player's body to count; grazes are free. */
-private const val GRAZE = 0.75f
 
 /** The boss walks in this long after a boss stage begins. */
 private const val BOSS_DELAY_TICKS = 90
@@ -54,7 +52,11 @@ private const val BOSS_DELAY_TICKS = 90
 /** While its drones fly, the Apiary takes this share of each hit. */
 private const val SHIELDED_DAMAGE = 0.3f
 
-private val INVULN_TICKS = (Balance.INVULN_SECONDS * TICK_HZ).toInt()
+val INVULN_TICKS = (Balance.INVULN_SECONDS * TICK_HZ).toInt()
+val HOSTILE_TICKS = (Balance.HOSTILE_SECONDS * TICK_HZ).toInt()
+
+/** A shot has to reach this far into the player's body to count; grazes are free. */
+const val GRAZE = 0.75f
 val REVIVE_TICKS = (Balance.REVIVE_SECONDS * TICK_HZ).toInt()
 
 enum class Phase {
@@ -104,6 +106,13 @@ class World(seed: Long = 1L) {
     var stageTicks = 0
         private set
 
+    /**
+     * Players on another phone. Their phone decides what their shots hit and
+     * what hits them, from what it shows, so a slow link never costs them a
+     * hit they dodged or a kill they landed. Here their shots are only drawn.
+     */
+    val remote = BooleanArray(MAX_PLAYERS)
+
     /** Index of the boss in [enemies], or -1. Refreshed whenever indices can move. */
     var boss = -1
         private set
@@ -134,7 +143,7 @@ class World(seed: Long = 1L) {
         coinBase = coinBaseFor(stage)
         nextId = 1
         playerCount = players.coerceIn(1, MAX_PLAYERS)
-        this.players.reset(playerCount)
+        this.players.reset(playerCount, difficulty.bonusHp)
         bullets.clear()
         hostile.clear()
         enemies.clear()
@@ -143,6 +152,7 @@ class World(seed: Long = 1L) {
         boss = -1
         bossDue = -1
         shownBossType = -1
+        remote.fill(false)
         director.startStage()
     }
 
@@ -266,7 +276,41 @@ class World(seed: Long = 1L) {
     /** An enemy shot leaving [x], [y] at [angle]. */
     internal fun spawnHostile(x: Float, y: Float, angle: Float, speed: Float) {
         val s = speed * hostileSpeedScale()
-        hostile.add(nextId++, x, y, cos(angle) * s, sin(angle) * s, (Balance.HOSTILE_SECONDS * TICK_HZ).toInt(), 1f, Balance.HOSTILE_RADIUS, 0, -1)
+        val id = nextId++
+        val vx = cos(angle) * s
+        val vy = sin(angle) * s
+        if (hostile.add(id, x, y, vx, vy, HOSTILE_TICKS, 1f, Balance.HOSTILE_RADIUS, 0, -1) < 0) return
+        // Shots fly straight, so other phones only need to hear about them once. The tick rides in angle.
+        events.add(Events.HOSTILE_SPAWN, id, x, y, vx, vy, tick.toFloat())
+    }
+
+    /**
+     * A shot from player [p]'s phone hit the enemy whose id ends in [id16].
+     * The phone already saw it land; this applies it.
+     */
+    fun remoteHit(p: Int, id16: Int, ux: Float, uy: Float) {
+        if (phase != Phase.FIGHT && phase != Phase.CLEAR) return
+        val e = enemies
+        for (j in 0 until e.count) {
+            if (e.id[j] and 0xFFFF != id16 || e.hp[j] <= 0f) continue
+            damageEnemy(j, players.damage(p), ux, uy, p)
+            return
+        }
+    }
+
+    /** Player [p]'s phone saw them get hit, by the enemy shot whose id ends in [shot16], or by touch when it is -1. */
+    fun remoteHurt(p: Int, shot16: Int) {
+        if (phase != Phase.FIGHT && phase != Phase.CLEAR) return
+        if (shot16 >= 0) {
+            val h = hostile
+            for (i in 0 until h.count) {
+                if (h.id[i] and 0xFFFF != shot16 || h.life[i] <= 0) continue
+                h.life[i] = 0
+                events.add(Events.HOSTILE_GONE, h.id[i])
+                break
+            }
+        }
+        if (players.alive(p) && players.invuln[p] == 0) hurtPlayer(p)
     }
 
     fun stageProgress() = min(stageTicks / STAGE_TICKS.toFloat(), 1f)
@@ -282,15 +326,15 @@ class World(seed: Long = 1L) {
 
     fun bossHpScale(): Float {
         val round = (stage / Bestiary.BOSS_EVERY - 1).coerceAtLeast(0) / Bestiary.bossOrder.size
-        return difficulty.toughness *
+        return difficulty.bossToughness *
             (1f + Balance.BOSS_HP_PER_PLAYER * (presentCount() - 1)) *
             (1f + Balance.BOSS_HP_PER_ROUND * round)
     }
 
     /** Enemies attack more often as stages go by. */
-    fun attackRate() = min(1f + Balance.ATTACK_RATE_PER_STAGE * (stage - 1), Balance.ATTACK_RATE_MAX)
+    fun attackRate() = difficulty.attackRate * min(1f + Balance.ATTACK_RATE_PER_STAGE * (stage - 1), Balance.ATTACK_RATE_MAX)
 
-    fun hostileSpeedScale() = min(1f + Balance.HOSTILE_SPEED_PER_STAGE * (stage - 1), Balance.HOSTILE_SPEED_MAX)
+    fun hostileSpeedScale() = difficulty.shotSpeed * min(1f + Balance.HOSTILE_SPEED_PER_STAGE * (stage - 1), Balance.HOSTILE_SPEED_MAX)
 
     /** More players bring more enemies. */
     fun crowd() = 1f + Balance.CROWD_PER_PLAYER * (presentCount() - 1)
@@ -408,7 +452,8 @@ class World(seed: Long = 1L) {
         val pl = players
         val speed = pl.bulletSpeed(p)
         val life = (pl.range(p) / speed * TICK_HZ).toInt()
-        val damage = pl.damage(p)
+        // A remote player's shots here are for show; their own phone reports what they hit.
+        val damage = if (remote[p]) 0f else pl.damage(p)
         val radius = pl.bulletRadius(p)
         val pierce = pl.pierce(p)
         val muzzle = Balance.PLAYER_RADIUS * MUZZLE
@@ -491,7 +536,7 @@ class World(seed: Long = 1L) {
                 val j = enemyTouching(b.x[i], b.y[i], b.radius[i], b.lastHit[i])
                 if (j < 0) continue
                 b.lastHit[i] = enemies.id[j]
-                hitEnemy(j, i)
+                if (b.damage[i] > 0f) hitEnemy(j, i)
                 if (b.pierce[i] > 0) {
                     b.pierce[i]--
                 } else {
@@ -503,14 +548,16 @@ class World(seed: Long = 1L) {
     }
 
     private fun hitEnemy(j: Int, bullet: Int) {
-        val e = enemies
         val b = bullets
-        val def = Bestiary.of(e.type[j])
         val speed = sqrt(b.vx[bullet] * b.vx[bullet] + b.vy[bullet] * b.vy[bullet])
-        val ux = b.vx[bullet] / speed
-        val uy = b.vy[bullet] / speed
+        damageEnemy(j, b.damage[bullet], b.vx[bullet] / speed, b.vy[bullet] / speed, b.owner[bullet])
+    }
+
+    private fun damageEnemy(j: Int, damage: Float, ux: Float, uy: Float, owner: Int) {
+        val e = enemies
+        val def = Bestiary.of(e.type[j])
         val shielded = e.type[j] == Bestiary.APIARY && brains.escorts > 0
-        e.hp[j] -= b.damage[bullet] * (if (shielded) SHIELDED_DAMAGE else 1f)
+        e.hp[j] -= damage * (if (shielded) SHIELDED_DAMAGE else 1f)
         e.flash[j] = FLASH_TICKS
         e.kx[j] += ux * Balance.KNOCKBACK / def.mass
         e.ky[j] += uy * Balance.KNOCKBACK / def.mass
@@ -518,7 +565,7 @@ class World(seed: Long = 1L) {
             events.add(Events.ENEMY_HIT, e.type[j], e.x[j], e.y[j], ux, uy)
             return
         }
-        kill(j, b.owner[bullet], ux, uy)
+        kill(j, owner, ux, uy)
     }
 
     private fun kill(j: Int, owner: Int, ux: Float, uy: Float) {
@@ -543,7 +590,7 @@ class World(seed: Long = 1L) {
 
     /** Wealth adds a fraction; the fraction becomes an extra coin that often. */
     private fun coinValueFor(p: Int): Int {
-        val exact = coinBase * (1f + players.wealth(p))
+        val exact = coinBase * (1f + players.wealth(p)) * difficulty.coinValue
         val whole = exact.toInt()
         return if (rng.nextFloat() < exact - whole) whole + 1 else whole
     }
@@ -563,12 +610,13 @@ class World(seed: Long = 1L) {
                 continue
             }
             for (p in 0 until playerCount) {
-                if (!pl.alive(p) || pl.invuln[p] > 0) continue
+                if (!pl.alive(p) || pl.invuln[p] > 0 || remote[p]) continue
                 val reach = h.radius[i] + Balance.PLAYER_RADIUS * GRAZE
                 val dx = pl.x[p] - h.x[i]
                 val dy = pl.y[p] - h.y[i]
                 if (dx * dx + dy * dy < reach * reach) {
                     h.life[i] = 0
+                    events.add(Events.HOSTILE_GONE, h.id[i])
                     hurtPlayer(p)
                     break
                 }
@@ -601,7 +649,8 @@ class World(seed: Long = 1L) {
                     pl.y[p] = (e.y[b] - dy / d * reach).coerceIn(r, ARENA_H - r)
                 }
             }
-            if (touched && pl.invuln[p] == 0) hurtPlayer(p)
+            // Enemies still make way for a remote player, but only their own phone says when it hurts.
+            if (touched && pl.invuln[p] == 0 && !remote[p]) hurtPlayer(p)
         }
     }
 

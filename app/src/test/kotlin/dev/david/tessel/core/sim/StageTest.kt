@@ -76,13 +76,13 @@ class StageTest {
 
     @Test
     fun enemiesToughenAfterTheFirstZone() {
-        assertEquals(1f, world.enemyHpScale(), 0f)
+        assertEquals(Difficulty.NORMAL.toughness, world.enemyHpScale(), 0f)
         repeat(3) {
             stepUntil(STAGE_TICKS * 2) { world.phase == Phase.SHOP }
             world.nextStage()
         }
         assertEquals(4, world.stage)
-        assertTrue(world.enemyHpScale() > 1f)
+        assertTrue(world.enemyHpScale() > Difficulty.NORMAL.toughness)
     }
 
     @Test
@@ -102,7 +102,10 @@ class StageTest {
         world.players.hp[1] = 0
         stepUntil(STAGE_TICKS * 2) { world.phase == Phase.SHOP }
         world.nextStage()
-        assertEquals(Balance.PLAYER_HP / 2, world.players.hp[1])
+        assertEquals(START_HP / 2, world.players.hp[1])
         assertFalse(world.over)
     }
 }
+
+/** What a player starts with on Normal, which these worlds use. */
+private val START_HP = Balance.PLAYER_HP + Difficulty.NORMAL.bonusHp

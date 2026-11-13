@@ -7,6 +7,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -33,6 +34,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -46,6 +49,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import dev.david.tessel.ui.theme.Corner
 import dev.david.tessel.ui.theme.MinTarget
@@ -72,14 +76,38 @@ fun Text(
     )
 }
 
-/** Shrinks a touch the moment it lands, not when it lifts. */
+/** Shrinks a touch the moment it lands, not when it lifts. Shows a ring when a controller has it in focus. */
 @Composable
-fun Modifier.pressScale(source: MutableInteractionSource, enabled: Boolean = true): Modifier {
+fun Modifier.pressScale(source: MutableInteractionSource, enabled: Boolean = true, corner: Dp = Corner.button): Modifier {
     val pressed by source.collectIsPressedAsState()
     val scale by animateFloatAsState(if (pressed && enabled) 0.97f else 1f, Springs.press(), label = "press")
     return graphicsLayer {
         scaleX = scale
         scaleY = scale
+    }.focusRing(source, corner)
+}
+
+/**
+ * A ring around whatever a controller or keyboard has selected. Touch never
+ * focuses anything, so on a phone in the hand this never shows.
+ */
+@Composable
+fun Modifier.focusRing(source: MutableInteractionSource, corner: Dp = Corner.button): Modifier {
+    val focused by source.collectIsFocusedAsState()
+    val ring = Theme.colors.ink
+    return drawWithContent {
+        drawContent()
+        if (focused) {
+            // Drawn just inside the edge, so a parent that clips (a grouped list) cannot cut it off.
+            val w = 2.dp.toPx()
+            drawRoundRect(
+                color = ring,
+                topLeft = Offset(w / 2, w / 2),
+                size = Size(size.width - w, size.height - w),
+                cornerRadius = CornerRadius((corner.toPx() - w / 2).coerceAtLeast(0f)),
+                style = Stroke(w),
+            )
+        }
     }
 }
 
@@ -141,6 +169,7 @@ fun NavRow(title: String, onClick: (() -> Unit)?, modifier: Modifier = Modifier,
         modifier
             .fillMaxWidth()
             .heightIn(min = 56.dp)
+            .focusRing(source, corner = 0.dp)
             .clickable(source, indication = null, enabled = enabled, role = Role.Button) { onClick?.invoke() }
             .padding(horizontal = Space.x4, vertical = Space.x2),
         verticalAlignment = Alignment.CenterVertically,
@@ -213,13 +242,15 @@ fun Segmented(options: List<String>, selected: Int, onSelect: (Int) -> Unit, mod
         Row(Modifier.fillMaxSize()) {
             options.forEachIndexed { i, label ->
                 val chosen = i == selected
+                val source = remember { MutableInteractionSource() }
                 Box(
                     Modifier
                         .weight(1f)
                         .fillMaxHeight()
+                        .focusRing(source, Corner.chip - 3.dp)
                         .selectable(
                             selected = chosen,
-                            interactionSource = remember { MutableInteractionSource() },
+                            interactionSource = source,
                             indication = null,
                             role = Role.Tab,
                         ) { onSelect(i) },

@@ -5,13 +5,19 @@ import android.graphics.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.test.captureToImage
-import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.activity.ComponentActivity
+import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.performScrollTo
 import dev.david.tessel.core.content.Bestiary
 import dev.david.tessel.core.content.Difficulty
 import dev.david.tessel.core.content.Upgrades
@@ -31,6 +37,11 @@ import dev.david.tessel.platform.game.Shards
 import dev.david.tessel.platform.game.Viewport
 import dev.david.tessel.platform.input.StickView
 import dev.david.tessel.ui.components.Sheet
+import dev.david.tessel.platform.store.Records
+import dev.david.tessel.platform.store.Settings
+import dev.david.tessel.platform.update.Updater
+import dev.david.tessel.ui.screens.HomeScreen
+import dev.david.tessel.ui.screens.SettingsScreen
 import dev.david.tessel.ui.screens.ShopPanel
 import dev.david.tessel.ui.theme.TesselTheme
 import org.junit.Rule
@@ -53,7 +64,7 @@ import kotlin.math.sin
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @Config(sdk = [35], qualifiers = "w914dp-h411dp-land-night-420dpi")
 class Screenshots {
-    @get:Rule val compose = createComposeRule()
+    @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
 
     private val width = 2400
     private val height = 1080
@@ -129,14 +140,18 @@ class Screenshots {
         return bitmap
     }
 
-    private fun save(bitmap: Bitmap, name: String) {
-        File(out, name).outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+    private fun save(bitmap: Bitmap, name: String, dir: File = out) {
+        dir.mkdirs()
+        File(dir, name).outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
     }
+
+    /** Menus worth a look but not for the README. */
+    private val checks = File("build/screens")
 
     @Test
     fun aStageInFullSwing() {
         val scene = Scene(players = 1, stage = 13, seed = 1313, palette = Palette.Dark, density = density)
-        scene.play(38f)
+        scene.play(31f)
         settle(scene)
         save(draw(scene, Palette.Dark), "stage.png")
     }
@@ -205,5 +220,28 @@ class Screenshots {
         compose.mainClock.advanceTimeBy(3000)
         compose.waitForIdle()
         save(compose.onRoot().captureToImage().asAndroidBitmap(), "shop.png")
+    }
+
+    @Test
+    fun homeAndSettings() {
+        val updater = Updater(compose.activity)
+        var page by mutableStateOf(0)
+        compose.setContent {
+            TesselTheme {
+                if (page == 0) {
+                    HomeScreen(Settings(difficulty = Difficulty.EASY), Records(), {}, {}, {}, {})
+                } else {
+                    SettingsScreen(Settings(), updater, inRun = false, onChange = {}, onBack = {})
+                }
+            }
+        }
+        compose.mainClock.advanceTimeBy(1000)
+        save(compose.onRoot().captureToImage().asAndroidBitmap(), "home.png", checks)
+        page = 1
+        compose.mainClock.advanceTimeBy(1000)
+        compose.onNodeWithText("Check for Updates").performScrollTo()
+        compose.mainClock.advanceTimeBy(1000)
+        compose.waitForIdle()
+        save(compose.onRoot().captureToImage().asAndroidBitmap(), "settings.png", checks)
     }
 }

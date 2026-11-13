@@ -57,7 +57,8 @@ class PlayerState {
 
     private fun scaled(p: Int, upgrade: Int, base: Float) = base * (1f + Upgrades.of(upgrade).step * levels[p][upgrade])
 
-    fun reset(count: Int) {
+    /** [bonusHp] comes from the difficulty: Easy starts with more health, Impossible with less. */
+    fun reset(count: Int, bonusHp: Int = 0) {
         for (i in 0 until MAX_PLAYERS) {
             // A lone player starts dead centre, a team stands in a row around it.
             x[i] = ARENA_W / 2f + (i - (count - 1) / 2f) * 70f
@@ -66,7 +67,7 @@ class PlayerState {
             prevY[i] = y[i]
             aimX[i] = 1f
             aimY[i] = 0f
-            maxHp[i] = Balance.PLAYER_HP
+            maxHp[i] = (Balance.PLAYER_HP + bonusHp).coerceAtLeast(1)
             hp[i] = if (i < count) maxHp[i] else 0
             invuln[i] = 0
             hurt[i] = 0

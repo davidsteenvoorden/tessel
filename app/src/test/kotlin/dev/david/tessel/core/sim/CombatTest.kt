@@ -1,6 +1,7 @@
 package dev.david.tessel.core.sim
 
 import dev.david.tessel.core.content.Balance
+import dev.david.tessel.core.content.Difficulty
 import dev.david.tessel.core.content.Bestiary
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -114,12 +115,12 @@ class CombatTest {
         val py = world.players.y[0]
         world.spawnEnemy(Bestiary.DOT, px + 5f, py)
         world.step(inputs)
-        assertEquals(Balance.PLAYER_HP - 1, world.players.hp[0])
+        assertEquals(START_HP - 1, world.players.hp[0])
         assertTrue(world.players.invuln[0] > 0)
 
         world.spawnEnemy(Bestiary.DOT, px - 5f, py)
         world.step(inputs)
-        assertEquals(Balance.PLAYER_HP - 1, world.players.hp[0])
+        assertEquals(START_HP - 1, world.players.hp[0])
     }
 
     @Test
@@ -155,7 +156,7 @@ class CombatTest {
         world.reset(seed = 3)
         assertFalse(world.over)
         assertEquals(0, world.enemies.count)
-        assertEquals(Balance.PLAYER_HP, world.players.hp[0])
+        assertEquals(START_HP, world.players.hp[0])
         assertEquals(0, world.tick)
     }
 
@@ -172,3 +173,6 @@ class CombatTest {
         assertTrue(dx * dx + dy * dy > reach * reach * 0.8f)
     }
 }
+
+/** What a player starts with on Normal, which these worlds use. */
+private val START_HP = Balance.PLAYER_HP + Difficulty.NORMAL.bonusHp

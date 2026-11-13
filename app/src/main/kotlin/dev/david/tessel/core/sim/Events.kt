@@ -60,5 +60,11 @@ class Events(private val capacity: Int = 512) {
         /** A boss walked in; [who] is its type. */
         const val BOSS_IN = 13
         const val BOSS_DOWN = 14
+
+        /** An enemy shot left [who] = its id, at x, y with velocity dx, dy, on the tick in angle. Only for other phones. */
+        const val HOSTILE_SPAWN = 15
+
+        /** The enemy shot with id [who] was used up hitting someone. Only for other phones. */
+        const val HOSTILE_GONE = 16
     }
 }

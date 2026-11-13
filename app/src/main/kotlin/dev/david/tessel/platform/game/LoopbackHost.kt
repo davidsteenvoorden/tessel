@@ -22,7 +22,10 @@ class LoopbackHost(
     private val delayMillis: Long,
     private val toClient: (ByteArray) -> Unit,
 ) {
-    private val world = World(seed = 4242).apply { reset(players = PLAYERS, seed = 4242) }
+    private val world = World(seed = 4242).apply {
+        reset(players = PLAYERS, seed = 4242)
+        remote[YOU] = true
+    }
     private val bot = Bot()
     private val inputs = Array(PLAYERS) { PlayerInput() }
     private var paused = false
@@ -81,6 +84,7 @@ class LoopbackHost(
 
     private fun restart() {
         world.reset(players = PLAYERS, seed = System.nanoTime())
+        world.remote[YOU] = true
         paused = false
         session.announceStart()
     }

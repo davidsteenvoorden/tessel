@@ -9,7 +9,7 @@ import java.nio.ByteOrder
  * layout below changes; mismatched phones then refuse each other politely.
  */
 object Wire {
-    const val VERSION = 2
+    const val VERSION = 3
 
     const val HELLO = 1
     const val START = 2

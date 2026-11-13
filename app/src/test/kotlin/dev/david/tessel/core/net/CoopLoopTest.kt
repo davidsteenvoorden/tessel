@@ -48,6 +48,7 @@ class CoopLoopTest {
     private fun setUp(count: Int) {
         players = count
         world.reset(players = count, seed = 21)
+        for (p in 1 until count) world.remote[p] = true
         host = HostSession(world) { to, bytes, _ -> post += Letter(now + delayNanos, bytes, HOST_PLAYER, to); true }
         for (p in 1 until count) host.connect(p)
         host.onRequest = { kind ->
@@ -130,20 +131,65 @@ class CoopLoopTest {
     }
 
     @Test
-    fun theClientsTriggerFiresRealBulletsOnTheHost() {
+    fun theClientsShotsCountWhereItsScreenSawThemLand() {
         world.spawning = false
         run(0.5f)
+        val px = world.players.x[CLIENT]
+        val py = world.players.y[CLIENT]
+        val slab = world.spawnEnemy(dev.david.tessel.core.content.Bestiary.SLAB, px, py - 200f)
+        val id = world.enemies.id[slab]
+        run(0.3f, hostDrivesBot = false)
         clientStick.aimX = 0f
         clientStick.aimY = -1f
         clientStick.fire = true
+        run(3f, hostDrivesBot = false)
+        var alive = false
+        for (i in 0 until world.enemies.count) if (world.enemies.id[i] == id) alive = true
+        assertTrue("the slab should have broken", !alive)
+        assertEquals(1, world.players.kills[CLIENT])
+        // The host draws the client's shots too, but they do no damage there.
+        var ghosts = 0
+        for (i in 0 until world.bullets.count) if (world.bullets.owner[i] == CLIENT) {
+            ghosts++
+            assertEquals(0f, world.bullets.damage[i], 0f)
+        }
+        assertTrue(ghosts > 0)
+    }
+
+    @Test
+    fun anEnemyShotTheClientSeesHurtsItOnce() {
+        world.spawning = false
         run(0.5f)
-        var hostCopies = 0
-        for (i in 0 until world.bullets.count) if (world.bullets.owner[i] == CLIENT) hostCopies++
-        assertTrue(hostCopies > 0)
-        // The client draws its own predicted shots, not the host's copies.
-        var drawnOwn = 0
-        for (i in 0 until client.view.bullets.count) if (client.view.bullets.owner[i] == CLIENT) drawnOwn++
-        assertTrue(drawnOwn > 0)
+        val before = world.players.hp[CLIENT]
+        world.spawnHostile(world.players.x[CLIENT] - 150f, world.players.y[CLIENT], 0f, 200f)
+        run(1.5f, hostDrivesBot = false)
+        assertEquals(before - 1, world.players.hp[CLIENT])
+        // Used up: gone on the host and on the client.
+        assertEquals(0, world.hostile.count)
+        assertEquals(0, client.view.hostile.count)
+    }
+
+    @Test
+    fun theHostLeavesAJoinedPlayersDamageToTheirPhone() {
+        world.spawning = false
+        run(0.5f)
+        // The host sees a shot pass right through the client, but the client's phone never saw it.
+        val before = world.players.hp[CLIENT]
+        world.hostile.add(9, world.players.x[CLIENT] - 30f, world.players.y[CLIENT], 300f, 0f, 20, 1f, 5f, 0, -1)
+        repeat(10) { world.step(hostInputs) }
+        assertEquals(before, world.players.hp[CLIENT])
+    }
+
+    @Test
+    fun everyoneElsesShotsAreDrawnOnEachPhone() {
+        setUp(3)
+        world.spawning = false
+        sticks[2].aimX = 1f
+        sticks[2].fire = true
+        run(1f)
+        var fromTwo = 0
+        for (i in 0 until clients[0].view.bullets.count) if (clients[0].view.bullets.owner[i] == 2) fromTwo++
+        assertTrue("player 1 sees player 2 shooting", fromTwo > 0)
     }
 
     @Test

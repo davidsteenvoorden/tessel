@@ -10,8 +10,9 @@ const val HOST_PLAYER = 0
 
 /**
  * The host's side of a co-op game. The host runs the only real simulation;
- * this feeds it the other players' input, applies their shop choices and
- * sends each of them what to draw, 20 times a second.
+ * this feeds it the other players' input and what their phones saw them hit
+ * or get hit by, applies their shop choices and sends each of them what to
+ * draw, 30 times a second.
  *
  * [send] returns false when a latest-state message was skipped because the
  * previous one to that player is still on its way; the events it carried are
@@ -23,6 +24,9 @@ class HostSession(private val world: World, private val send: (player: Int, byte
     private val lastInputNanos = LongArray(MAX_PLAYERS)
     private val lastSentNanos = LongArray(MAX_PLAYERS)
     private val outbox = Array(MAX_PLAYERS) { Events(512) }
+    private val born = Array(MAX_PLAYERS) { Events(SNAPSHOT_SHOTS) }
+    private val gone = Array(MAX_PLAYERS) { Events(SNAPSHOT_SHOTS) }
+    private val reports = Reports()
     private val buf = Wire.buffer(MAX_MESSAGE * 2)
 
     /** Bit p set once player p pressed Ready in the shop. */
@@ -39,6 +43,8 @@ class HostSession(private val world: World, private val send: (player: Int, byte
     fun connect(player: Int) {
         linked = linked or (1 shl player)
         outbox[player].clear()
+        born[player].clear()
+        gone[player].clear()
         lastSentNanos[player] = 0L
     }
 
@@ -52,8 +58,10 @@ class HostSession(private val world: World, private val send: (player: Int, byte
         val buf = Wire.open(bytes)
         when (Wire.typeOf(bytes)) {
             Wire.INPUT -> {
-                Protocol.readInput(buf, remote[player])
+                Protocol.readInput(buf, remote[player], reports)
                 lastInputNanos[player] = nowNanos
+                for (k in 0 until reports.hits) world.remoteHit(player, reports.hitId[k], reports.hitX[k], reports.hitY[k])
+                for (k in 0 until reports.hurts) world.remoteHurt(player, reports.hurtBy[k])
             }
             Wire.ACTION -> {
                 val kind = buf.get().toInt()
@@ -98,13 +106,19 @@ class HostSession(private val world: World, private val send: (player: Int, byte
     /** Keeps the events the other phones need; call before the world's events are cleared. */
     fun collect(events: Events) {
         for (i in 0 until events.count) {
-            when (events.kind[i]) {
-                // Each phone makes its own shot ticks, and coin pickups need no show.
-                Events.SHOT, Events.COIN, Events.ENEMY_HIT -> continue
-            }
+            val kind = events.kind[i]
+            // Coin pickups need no show, and hit flashes travel with each enemy.
+            if (kind == Events.COIN || kind == Events.ENEMY_HIT) continue
             for (p in 1 until world.playerCount) {
                 if (linked and (1 shl p) == 0) continue
-                outbox[p].add(events.kind[i], events.who[i], events.x[i], events.y[i], events.dx[i], events.dy[i], events.angle[i])
+                // A phone flies its own shots already.
+                if (kind == Events.SHOT && events.who[i] == p) continue
+                val to = when (kind) {
+                    Events.HOSTILE_SPAWN -> born[p]
+                    Events.HOSTILE_GONE -> gone[p]
+                    else -> outbox[p]
+                }
+                to.add(kind, events.who[i], events.x[i], events.y[i], events.dx[i], events.dy[i], events.angle[i])
             }
         }
     }
@@ -114,9 +128,11 @@ class HostSession(private val world: World, private val send: (player: Int, byte
         for (p in 1 until world.playerCount) {
             if (linked and (1 shl p) == 0) continue
             if (nowNanos - lastSentNanos[p] < SNAPSHOT_NANOS) continue
-            Protocol.writeSnapshot(buf, world, paused, waiting, ready, outbox[p], p)
+            Protocol.writeSnapshot(buf, world, paused, waiting, ready, outbox[p], born[p], gone[p], p)
             if (send(p, Wire.finish(buf), true)) {
                 outbox[p].clear()
+                born[p].clear()
+                gone[p].clear()
                 lastSentNanos[p] = nowNanos
             }
         }
@@ -126,6 +142,8 @@ class HostSession(private val world: World, private val send: (player: Int, byte
     fun announceStart() {
         for (p in 1 until world.playerCount) {
             outbox[p].clear()
+            born[p].clear()
+            gone[p].clear()
             lastSentNanos[p] = 0L
             if (linked and (1 shl p) != 0) send(p, Wire.start(world.difficulty.ordinal, p, world.playerCount), false)
         }
@@ -133,7 +151,8 @@ class HostSession(private val world: World, private val send: (player: Int, byte
     }
 
     companion object {
-        const val SNAPSHOT_NANOS = 50_000_000L
+        /** 30 snapshots a second: small enough now that bullets do not travel. */
+        const val SNAPSHOT_NANOS = 33_000_000L
         const val STALE_NANOS = 400_000_000L
     }
 }

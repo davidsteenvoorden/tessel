@@ -29,7 +29,7 @@ class ProtocolTest {
 
     private fun roundTrip(w: World, outbox: Events = Events(), paused: Boolean = false, ready: Int = 0): Snapshot {
         val buf = Wire.buffer(MAX_MESSAGE * 2)
-        Protocol.writeSnapshot(buf, w, paused, false, ready, outbox, CLIENT)
+        Protocol.writeSnapshot(buf, w, paused, false, ready, outbox, Events(), Events(), CLIENT)
         val bytes = Wire.finish(buf)
         assertEquals(Wire.SNAPSHOT, Wire.typeOf(bytes))
         val s = Snapshot()
@@ -67,13 +67,24 @@ class ProtocolTest {
     }
 
     @Test
-    fun theClientsOwnBulletsAreLeftOut() {
+    fun enemyShotsTravelOnceWhenFiredAndOnceWhenUsedUp() {
         val w = busyWorld()
-        val s = roundTrip(w)
-        var hostBullets = 0
-        for (i in 0 until w.bullets.count) if (w.bullets.owner[i] != CLIENT) hostBullets++
-        assertTrue(w.bullets.count > hostBullets)
-        assertEquals(hostBullets, s.bulletCount)
+        val born = Events()
+        born.add(Events.HOSTILE_SPAWN, 70_123, 300.5f, 200f, 155.25f, -80.5f, (w.tick - 3).toFloat())
+        val gone = Events()
+        gone.add(Events.HOSTILE_GONE, 70_100)
+        val buf = Wire.buffer(MAX_MESSAGE * 2)
+        Protocol.writeSnapshot(buf, w, false, false, 0, Events(), born, gone, CLIENT)
+        val s = Snapshot()
+        Protocol.readSnapshot(Wire.open(Wire.finish(buf)), s)
+        assertEquals(1, s.bornCount)
+        assertEquals(70_123 and 0xFFFF, s.bornId[0])
+        assertEquals(300.5f, s.bornX[0], 0.13f)
+        assertEquals(155.25f, s.bornVx[0], 0.13f)
+        assertEquals(-80.5f, s.bornVy[0], 0.13f)
+        assertEquals(w.tick - 3, s.bornTick[0])
+        assertEquals(1, s.goneCount)
+        assertEquals(70_100 and 0xFFFF, s.goneId[0])
     }
 
     @Test
@@ -119,8 +130,12 @@ class ProtocolTest {
         while (w.coins.add(w.coins.count + 1, 10f, 10f, 0f, 0f, 1) >= 0) Unit
         val outbox = Events(2048)
         repeat(2048) { outbox.add(Events.ENEMY_KILLED, Bestiary.DOT, 1f, 1f) }
+        val born = Events(SNAPSHOT_SHOTS)
+        repeat(SNAPSHOT_SHOTS) { born.add(Events.HOSTILE_SPAWN, it, 1f, 1f, 100f, 100f, 0f) }
+        val gone = Events(SNAPSHOT_SHOTS)
+        repeat(SNAPSHOT_SHOTS) { gone.add(Events.HOSTILE_GONE, it) }
         val buf = Wire.buffer(MAX_MESSAGE * 2)
-        Protocol.writeSnapshot(buf, w, false, false, 0, outbox, CLIENT)
+        Protocol.writeSnapshot(buf, w, false, false, 0, outbox, born, gone, CLIENT)
         assertTrue("worst case is ${buf.position()} bytes", buf.position() <= MAX_MESSAGE)
     }
 
@@ -130,15 +145,11 @@ class ProtocolTest {
         w.reset(players = 2, seed = 5)
         val boss = w.spawnEnemy(Bestiary.HEXARCH, 800f, 300f)
         w.enemies.hp[boss] = w.enemies.maxHp[boss] / 2
-        w.hostile.add(1, 300f, 200f, 120f, -60f, 30, 1f, 5f, 0, -1)
         inputs.forEach { it.clear() }
         w.step(inputs)
         val s = roundTrip(w)
         assertEquals(Bestiary.HEXARCH, s.bossType)
         assertEquals(w.bossHealth(), s.bossHealth, 0.01f)
-        assertEquals(w.hostile.count, s.hostileCount)
-        assertEquals(w.hostile.x[0], s.hostileX[0], 0.13f)
-        assertEquals(120f, s.hostileVx[0], 1f)
     }
 
     @Test
@@ -152,7 +163,7 @@ class ProtocolTest {
 
     @Test
     fun inputCarriesStickTriggerAndPosition() {
-        val buf = Wire.buffer(64)
+        val buf = Wire.buffer(1024)
         val sent = PlayerInput().apply {
             moveX = 0.5f
             moveY = -1f
@@ -160,9 +171,21 @@ class ProtocolTest {
             aimY = 0.8f
             fire = true
         }
-        Protocol.writeInput(buf, sent, 345.5f, 678.25f)
+        val told = Reports().apply {
+            hit(65_000, 0.6f, -0.8f)
+            hurt(1234)
+            hurt(-1)
+        }
+        Protocol.writeInput(buf, sent, 345.5f, 678.25f, told)
         val got = PlayerInput()
-        Protocol.readInput(Wire.open(Wire.finish(buf)), got)
+        val heard = Reports()
+        Protocol.readInput(Wire.open(Wire.finish(buf)), got, heard)
+        assertEquals(1, heard.hits)
+        assertEquals(65_000, heard.hitId[0])
+        assertEquals(-0.8f, heard.hitY[0], 0.01f)
+        assertEquals(2, heard.hurts)
+        assertEquals(1234, heard.hurtBy[0])
+        assertEquals(-1, heard.hurtBy[1])
         assertEquals(0.5f, got.moveX, 0.01f)
         assertEquals(-1f, got.moveY, 0.01f)
         assertEquals(0.8f, got.aimY, 0.01f)

@@ -576,7 +576,13 @@ class CoopLobby(private val activity: ComponentActivity, private val game: GameS
 
         /** No letters that read as digits (O, I, L) and no digits that read as letters (0, 1). */
         const val CODE_LETTERS = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
-        const val STALE_MS = 150L
+        /**
+         * A latest-only message waits for the one before it to finish sending.
+         * This is only a safety net for a transfer report that never comes;
+         * any shorter and a slow link piles up a queue of stale snapshots,
+         * which is exactly what makes a joining phone lag behind.
+         */
+        const val STALE_MS = 1000L
         const val RECONNECT_MS = 20_000L
     }
 }

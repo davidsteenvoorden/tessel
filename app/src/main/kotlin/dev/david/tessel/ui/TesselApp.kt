@@ -36,6 +36,7 @@ import dev.david.tessel.platform.game.ShopView
 import dev.david.tessel.platform.net.CoopLobby
 import dev.david.tessel.platform.net.LobbyState
 import dev.david.tessel.platform.store.SettingsStore
+import dev.david.tessel.platform.update.Updater
 import dev.david.tessel.ui.components.PauseButton
 import dev.david.tessel.ui.components.PrimaryButton
 import dev.david.tessel.ui.components.SecondaryButton
@@ -58,7 +59,7 @@ import dev.david.tessel.ui.theme.Type
  * end card. The game view sits underneath and gets every touch these leave alone.
  */
 @Composable
-fun TesselApp(game: GameSurfaceView, lobby: CoopLobby, store: SettingsStore, onStart: (() -> Unit)?) {
+fun TesselApp(game: GameSurfaceView, lobby: CoopLobby, store: SettingsStore, updater: Updater, onStart: (() -> Unit)?) {
     val c = Theme.colors
     val settings by store.settings.collectAsState()
     val records by store.records.collectAsState()
@@ -202,6 +203,7 @@ fun TesselApp(game: GameSurfaceView, lobby: CoopLobby, store: SettingsStore, onS
         ) {
             SettingsScreen(
                 settings = settings,
+                updater = updater,
                 inRun = mode != Mode.HOME,
                 onChange = store::update,
                 onBack = { settingsOpen = false },

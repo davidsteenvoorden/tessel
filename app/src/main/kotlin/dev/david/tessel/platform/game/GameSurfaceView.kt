@@ -34,6 +34,7 @@ import dev.david.tessel.core.sim.TICK_HZ
 import dev.david.tessel.core.sim.World
 import dev.david.tessel.design.Palette
 import dev.david.tessel.platform.audio.Haptics
+import dev.david.tessel.platform.input.Gamepad
 import dev.david.tessel.platform.input.StickView
 import dev.david.tessel.platform.input.TwinStickController
 import dev.david.tessel.platform.net.HostLink
@@ -60,6 +61,9 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
     private val debuggable = context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
 
     private val controller = TwinStickController(density)
+
+    /** A game controller, if one is connected. MainActivity hands it the axis events. */
+    val gamepad = Gamepad()
     private val world = World(seed = SystemClock.elapsedRealtimeNanos())
     private val viewport = Viewport()
     private val renderer = Renderer(density, paletteFor(resources.configuration)).apply {
@@ -143,6 +147,7 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
         dropCoop()
         becomeRole(Role.HOST)
         world.reset(players = players, seed = SystemClock.elapsedRealtimeNanos(), difficulty = difficulty)
+        for (p in 1 until players) world.remote[p] = true
         host = HostSession(world, link::send).also {
             for (p in 1 until players) it.connect(p)
             it.onRequest = ::onPartnerAsk
@@ -358,6 +363,7 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
         val usable = elapsed.coerceAtMost(MAX_CATCH_UP_NANOS)
 
         controller.read(inputs[0], moveView, aimView, now)
+        gamepad.apply(inputs[0])
         val simStart = System.nanoTime()
         val shown: World
         val c = client
@@ -535,6 +541,7 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
         // Players who left stay out of the new run too.
         val gone = BooleanArray(world.playerCount) { !world.players.present[it] }
         world.reset(players = world.playerCount, seed = SystemClock.elapsedRealtimeNanos(), difficulty = world.difficulty)
+        for (p in 1 until world.playerCount) world.remote[p] = true
         for (p in gone.indices) if (gone[p]) world.removePlayer(p)
         host?.announceStart()
         freshRun()

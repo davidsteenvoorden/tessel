@@ -1,6 +1,7 @@
 package dev.david.tessel.core.net
 
 import dev.david.tessel.core.content.Balance
+import dev.david.tessel.core.content.Bestiary
 import dev.david.tessel.core.sim.ARENA_H
 import dev.david.tessel.core.sim.ARENA_W
 import dev.david.tessel.core.sim.BulletPool
@@ -14,10 +15,10 @@ import kotlin.math.sin
 import kotlin.math.sqrt
 
 /**
- * The joining phone's own player, run locally so the thumb never waits for
- * the network. Movement is reported to the host, which accepts it. Shots
- * here are only for show: they fly and vanish on contact, while the host
- * fires the real ones and decides what they hit.
+ * A joining phone's own player, run locally so the thumb never waits for the
+ * network. Movement is reported to the host, which accepts it. Shots fly
+ * here, and what they hit, as drawn on this phone, is what counts: each hit
+ * is reported and the host applies it.
  */
 class Pilot {
     var x = 0f
@@ -92,27 +93,8 @@ class Pilot {
         return fired
     }
 
-    /** Shots that reached a drawn enemy disappear, the way the host's real ones will. */
-    fun cull(view: World) {
-        val e = view.enemies
-        for (i in 0 until shots.count) {
-            for (j in 0 until e.count) {
-                if (e.id[j] == shots.lastHit[i]) continue
-                val reach = shots.radius[i] + dev.david.tessel.core.content.Bestiary.of(e.type[j]).radius
-                val dx = e.x[j] - shots.x[i]
-                val dy = e.y[j] - shots.y[i]
-                if (dx * dx + dy * dy >= reach * reach) continue
-                shots.lastHit[i] = e.id[j]
-                if (shots.pierce[i] > 0) {
-                    shots.pierce[i]--
-                } else {
-                    shots.life[i] = 0
-                    break
-                }
-            }
-        }
-        shots.sweep()
-    }
+    /** Shots that reached a drawn enemy are used up, and each hit goes into [reports] for the host. */
+    fun cull(view: World, reports: Reports) = cullShots(shots, view, reports)
 
     private fun volley(s: Snapshot, me: Int) {
         val speed = s.bulletSpeed[me]
@@ -125,6 +107,47 @@ class Pilot {
             val dx = cos(a)
             val dy = sin(a)
             shots.add(nextId--, x + dx * muzzle, y + dy * muzzle, dx * speed, dy * speed, life, 0f, s.bulletRadius[me], s.pierce[me], me)
+        }
+    }
+
+    companion object {
+        /**
+         * Checks each shot's path since the last step against the drawn
+         * enemies, so a fast shot cannot skip over a small one. With
+         * [reports], hits are recorded for the host; without, the shots are
+         * someone else's and only vanish.
+         */
+        fun cullShots(shots: BulletPool, view: World, reports: Reports?) {
+            val e = view.enemies
+            for (i in 0 until shots.count) {
+                if (shots.life[i] <= 0) continue
+                val ax = shots.prevX[i]
+                val ay = shots.prevY[i]
+                val sx = shots.x[i] - ax
+                val sy = shots.y[i] - ay
+                val len2 = (sx * sx + sy * sy).coerceAtLeast(0.0001f)
+                for (j in 0 until e.count) {
+                    if (e.id[j] == shots.lastHit[i]) continue
+                    val reach = shots.radius[i] + Bestiary.of(e.type[j]).radius
+                    // Closest point of this step's path to the enemy's centre.
+                    val along = (((e.x[j] - ax) * sx + (e.y[j] - ay) * sy) / len2).coerceIn(0f, 1f)
+                    val dx = e.x[j] - (ax + sx * along)
+                    val dy = e.y[j] - (ay + sy * along)
+                    if (dx * dx + dy * dy >= reach * reach) continue
+                    shots.lastHit[i] = e.id[j]
+                    if (reports != null) {
+                        val speed = sqrt(shots.vx[i] * shots.vx[i] + shots.vy[i] * shots.vy[i]).coerceAtLeast(0.001f)
+                        reports.hit(e.id[j] and 0xFFFF, shots.vx[i] / speed, shots.vy[i] / speed)
+                    }
+                    if (shots.pierce[i] > 0) {
+                        shots.pierce[i]--
+                    } else {
+                        shots.life[i] = 0
+                        break
+                    }
+                }
+            }
+            shots.sweep()
         }
     }
 }

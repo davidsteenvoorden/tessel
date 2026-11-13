@@ -1,6 +1,7 @@
 package dev.david.tessel.core.sim
 
 import dev.david.tessel.core.content.Balance
+import dev.david.tessel.core.content.Difficulty
 import dev.david.tessel.core.content.Upgrades
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -125,7 +126,7 @@ class ShopTest {
         val slot = slotOf(Upgrades.MAX_HEALTH)
         world.players.hp[0] = 3
         assertTrue(shop.buy(world, 0, slot))
-        assertEquals(Balance.PLAYER_HP + 1, world.players.maxHp[0])
+        assertEquals(START_HP + 1, world.players.maxHp[0])
         assertEquals(4, world.players.hp[0])
     }
 
@@ -140,3 +141,6 @@ class ShopTest {
         assertEquals(Upgrades.rerollPrice(world.stage, 0), shop.rerollPrice(world, 0))
     }
 }
+
+/** What a player starts with on Normal, which these worlds use. */
+private val START_HP = Balance.PLAYER_HP + Difficulty.NORMAL.bonusHp

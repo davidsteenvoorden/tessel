@@ -2,10 +2,8 @@ package dev.david.tessel.core.net
 
 import dev.david.tessel.core.content.Difficulty
 import dev.david.tessel.core.sim.Events
-import dev.david.tessel.core.sim.MAX_BULLETS
 import dev.david.tessel.core.sim.MAX_COINS
 import dev.david.tessel.core.sim.MAX_ENEMIES
-import dev.david.tessel.core.sim.MAX_HOSTILE
 import dev.david.tessel.core.sim.MAX_PLAYERS
 import dev.david.tessel.core.sim.PlayerInput
 import dev.david.tessel.core.sim.Phase
@@ -16,7 +14,6 @@ import java.nio.ByteBuffer
 import kotlin.math.PI
 
 private const val ANGLE_SCALE = (127 / PI).toFloat()
-private const val RADIUS_SCALE = 16f
 
 /**
  * Kills and hits beyond this many in one snapshot are dropped. They only make
@@ -24,18 +21,36 @@ private const val RADIUS_SCALE = 16f
  */
 const val SNAPSHOT_EVENTS = 200
 
+/** Enemy shots fired, or used up, that one snapshot can carry. */
+const val SNAPSHOT_SHOTS = 1024
+
 /** Largest message Nearby Connections sends as a single bytes payload. */
 const val MAX_MESSAGE = 32 * 1024
+
+/** Velocities of enemy shots travel in eighths of a unit per second, so a shot that flies seven seconds drifts less than a unit. */
+private const val SPEED_SCALE = 8f
 
 /** Encoding and decoding of the two messages that carry the game itself. */
 object Protocol {
     /**
-     * The world as player [forPlayer] needs it. Their own bullets are left
-     * out because their phone already draws its own predicted copies.
+     * The world as player [forPlayer] needs it. No bullets travel at all:
+     * each phone flies its own shots, makes everyone else's from their shot
+     * events, and flies enemy shots from [born] (fired since the last
+     * snapshot) until [gone] says one was used up.
      * Entity ids travel as their low 16 bits; they only pair up the same body
      * between two snapshots a moment apart, and ids that far apart never meet.
      */
-    fun writeSnapshot(buf: ByteBuffer, w: World, paused: Boolean, waiting: Boolean, ready: Int, outbox: Events, forPlayer: Int) {
+    fun writeSnapshot(
+        buf: ByteBuffer,
+        w: World,
+        paused: Boolean,
+        waiting: Boolean,
+        ready: Int,
+        outbox: Events,
+        born: Events,
+        gone: Events,
+        forPlayer: Int,
+    ) {
         Wire.begin(buf, Wire.SNAPSHOT)
         buf.putInt(w.tick)
         buf.put(w.stage.coerceAtMost(255).toByte())
@@ -89,27 +104,18 @@ object Protocol {
             buf.put((e.angle[i] * ANGLE_SCALE).toInt().coerceIn(-127, 127).toByte())
         }
 
-        val b = w.bullets
-        var shown = 0
-        for (i in 0 until b.count) if (b.owner[i] != forPlayer) shown++
-        buf.putShort(shown.toShort())
-        for (i in 0 until b.count) {
-            if (b.owner[i] == forPlayer) continue
-            Wire.putPos(buf, b.x[i])
-            Wire.putPos(buf, b.y[i])
-            buf.putShort(b.vx[i].toInt().toShort())
-            buf.putShort(b.vy[i].toInt().toShort())
-            buf.put((b.radius[i] * RADIUS_SCALE).toInt().coerceIn(0, 255).toByte())
+        // Enemy shots fired since the last snapshot: where, how fast, and how many ticks ago.
+        buf.putShort(born.count.toShort())
+        for (i in 0 until born.count) {
+            buf.putShort(born.who[i].toShort())
+            Wire.putPos(buf, born.x[i])
+            Wire.putPos(buf, born.y[i])
+            putSpeed(buf, born.dx[i])
+            putSpeed(buf, born.dy[i])
+            buf.putShort((w.tick - born.angle[i].toInt()).coerceIn(0, Short.MAX_VALUE.toInt()).toShort())
         }
-
-        val h = w.hostile
-        buf.putShort(h.count.toShort())
-        for (i in 0 until h.count) {
-            Wire.putPos(buf, h.x[i])
-            Wire.putPos(buf, h.y[i])
-            buf.putShort(h.vx[i].toInt().toShort())
-            buf.putShort(h.vy[i].toInt().toShort())
-        }
+        buf.putShort(gone.count.toShort())
+        for (i in 0 until gone.count) buf.putShort(gone.who[i].toShort())
 
         val c = w.coins
         buf.putShort(c.count.toShort())
@@ -204,22 +210,17 @@ object Protocol {
             s.enemyIndex.put(s.enemyId[i], i)
         }
 
-        s.bulletCount = buf.short.toInt().coerceIn(0, MAX_BULLETS)
-        for (i in 0 until s.bulletCount) {
-            s.bulletX[i] = Wire.getPos(buf)
-            s.bulletY[i] = Wire.getPos(buf)
-            s.bulletVx[i] = buf.short.toFloat()
-            s.bulletVy[i] = buf.short.toFloat()
-            s.bulletRadiusOf[i] = (buf.get().toInt() and 0xFF) / RADIUS_SCALE
+        s.bornCount = buf.short.toInt().coerceIn(0, SNAPSHOT_SHOTS)
+        for (i in 0 until s.bornCount) {
+            s.bornId[i] = buf.short.toInt() and 0xFFFF
+            s.bornX[i] = Wire.getPos(buf)
+            s.bornY[i] = Wire.getPos(buf)
+            s.bornVx[i] = getSpeed(buf)
+            s.bornVy[i] = getSpeed(buf)
+            s.bornTick[i] = s.tick - buf.short.toInt()
         }
-
-        s.hostileCount = buf.short.toInt().coerceIn(0, MAX_HOSTILE)
-        for (i in 0 until s.hostileCount) {
-            s.hostileX[i] = Wire.getPos(buf)
-            s.hostileY[i] = Wire.getPos(buf)
-            s.hostileVx[i] = buf.short.toFloat()
-            s.hostileVy[i] = buf.short.toFloat()
-        }
+        s.goneCount = buf.short.toInt().coerceIn(0, SNAPSHOT_SHOTS)
+        for (i in 0 until s.goneCount) s.goneId[i] = buf.short.toInt() and 0xFFFF
 
         s.coinCount = buf.short.toInt().coerceIn(0, MAX_COINS)
         s.coinIndex.clear()
@@ -260,8 +261,11 @@ object Protocol {
         }
     }
 
-    /** What a client sends 30 times a second: its stick, its trigger and where it is. */
-    fun writeInput(buf: ByteBuffer, input: PlayerInput, x: Float, y: Float) {
+    /**
+     * What a joining phone sends 30 times a second: its stick, its trigger
+     * and where it is, plus whatever it saw its shots hit and what hit it.
+     */
+    fun writeInput(buf: ByteBuffer, input: PlayerInput, x: Float, y: Float, reports: Reports) {
         Wire.begin(buf, Wire.INPUT)
         Wire.putUnit(buf, input.moveX)
         Wire.putUnit(buf, input.moveY)
@@ -270,9 +274,17 @@ object Protocol {
         buf.put((if (input.fire) 1 else 0).toByte())
         Wire.putPos(buf, x)
         Wire.putPos(buf, y)
+        buf.put(reports.hits.toByte())
+        for (k in 0 until reports.hits) {
+            buf.putShort(reports.hitId[k].toShort())
+            Wire.putUnit(buf, reports.hitX[k])
+            Wire.putUnit(buf, reports.hitY[k])
+        }
+        buf.put(reports.hurts.toByte())
+        for (k in 0 until reports.hurts) buf.putShort(reports.hurtBy[k].toShort())
     }
 
-    fun readInput(buf: ByteBuffer, into: PlayerInput) {
+    fun readInput(buf: ByteBuffer, into: PlayerInput, reports: Reports) {
         into.moveX = Wire.getUnit(buf)
         into.moveY = Wire.getUnit(buf)
         into.aimX = Wire.getUnit(buf)
@@ -281,5 +293,17 @@ object Protocol {
         into.hasPosition = true
         into.posX = Wire.getPos(buf)
         into.posY = Wire.getPos(buf)
+        reports.clear()
+        val hits = buf.get().toInt() and 0xFF
+        repeat(hits) { reports.hit(buf.short.toInt() and 0xFFFF, Wire.getUnit(buf), Wire.getUnit(buf)) }
+        val hurts = buf.get().toInt() and 0xFF
+        // A touch travels as 0xFFFF, which reads back as -1.
+        repeat(hurts) { reports.hurt(buf.short.toInt()) }
     }
+
+    private fun putSpeed(buf: ByteBuffer, v: Float) {
+        buf.putShort((v * SPEED_SCALE).toInt().coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt()).toShort())
+    }
+
+    private fun getSpeed(buf: ByteBuffer): Float = buf.short / SPEED_SCALE
 }

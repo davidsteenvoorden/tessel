@@ -1,6 +1,7 @@
 package dev.david.tessel.core.sim
 
 import dev.david.tessel.core.content.Balance
+import dev.david.tessel.core.content.Difficulty
 import dev.david.tessel.core.content.Bestiary
 import dev.david.tessel.core.content.Move
 import org.junit.Assert.assertEquals
@@ -44,7 +45,7 @@ class EnemyTest {
         val py = world.players.y[0]
         world.hostile.add(1, px - 60f, py, 240f, 0f, 120, 1f, Balance.HOSTILE_RADIUS, 0, -1)
         steps(30)
-        assertEquals(Balance.PLAYER_HP - 1, world.players.hp[0])
+        assertEquals(START_HP - 1, world.players.hp[0])
         assertEquals(0, world.hostile.count)
     }
 
@@ -55,7 +56,7 @@ class EnemyTest {
         world.players.invuln[0] = 60
         world.hostile.add(1, px - 30f, py, 240f, 0f, 120, 1f, Balance.HOSTILE_RADIUS, 0, -1)
         steps(20)
-        assertEquals(Balance.PLAYER_HP, world.players.hp[0])
+        assertEquals(START_HP, world.players.hp[0])
     }
 
     @Test
@@ -157,3 +158,6 @@ class EnemyTest {
         repeat(20) { world.step(idle) }
     }
 }
+
+/** What a player starts with on Normal, which these worlds use. */
+private val START_HP = Balance.PLAYER_HP + Difficulty.NORMAL.bonusHp

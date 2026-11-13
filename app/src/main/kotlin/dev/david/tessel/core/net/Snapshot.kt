@@ -2,10 +2,8 @@ package dev.david.tessel.core.net
 
 import dev.david.tessel.core.content.Difficulty
 import dev.david.tessel.core.sim.Events
-import dev.david.tessel.core.sim.MAX_BULLETS
 import dev.david.tessel.core.sim.MAX_COINS
 import dev.david.tessel.core.sim.MAX_ENEMIES
-import dev.david.tessel.core.sim.MAX_HOSTILE
 import dev.david.tessel.core.sim.MAX_PLAYERS
 import dev.david.tessel.core.sim.Phase
 import dev.david.tessel.core.sim.SHOP_SLOTS
@@ -72,18 +70,16 @@ class Snapshot {
     val enemyAngle = FloatArray(MAX_ENEMIES)
     val enemyIndex = IdMap(1024)
 
-    var bulletCount = 0
-    val bulletX = FloatArray(MAX_BULLETS)
-    val bulletY = FloatArray(MAX_BULLETS)
-    val bulletVx = FloatArray(MAX_BULLETS)
-    val bulletVy = FloatArray(MAX_BULLETS)
-    val bulletRadiusOf = FloatArray(MAX_BULLETS)
-
-    var hostileCount = 0
-    val hostileX = FloatArray(MAX_HOSTILE)
-    val hostileY = FloatArray(MAX_HOSTILE)
-    val hostileVx = FloatArray(MAX_HOSTILE)
-    val hostileVy = FloatArray(MAX_HOSTILE)
+    // Enemy shots fired since the snapshot before, and ones used up.
+    var bornCount = 0
+    val bornId = IntArray(SNAPSHOT_SHOTS)
+    val bornX = FloatArray(SNAPSHOT_SHOTS)
+    val bornY = FloatArray(SNAPSHOT_SHOTS)
+    val bornVx = FloatArray(SNAPSHOT_SHOTS)
+    val bornVy = FloatArray(SNAPSHOT_SHOTS)
+    val bornTick = IntArray(SNAPSHOT_SHOTS)
+    var goneCount = 0
+    val goneId = IntArray(SNAPSHOT_SHOTS)
 
     var coinCount = 0
     val coinId = IntArray(MAX_COINS)

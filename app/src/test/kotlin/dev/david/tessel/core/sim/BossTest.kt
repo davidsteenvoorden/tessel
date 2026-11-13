@@ -13,6 +13,8 @@ class BossTest {
     private fun World.hold(ticks: Int) = repeat(ticks) {
         for (p in 0 until playerCount) if (players.present[p]) players.hp[p] = players.maxHp[p]
         step(idle)
+        // The game reads and clears these every frame; a full buffer would drop the ones a test looks for.
+        events.clear()
     }
 
     private fun bossAt(stage: Int, players: Int = 1): World {
