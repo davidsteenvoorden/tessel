@@ -9,7 +9,7 @@ import java.nio.ByteOrder
  * layout below changes; mismatched phones then refuse each other politely.
  */
 object Wire {
-    const val VERSION = 5
+    const val VERSION = 6
 
     const val HELLO = 1
     const val START = 2
@@ -33,6 +33,9 @@ object Wire {
     /** Joining phone to host, first thing through the direct pipe. */
     const val DIRECT_HELLO = 10
 
+    /** Host to everyone, through Nearby: the game was saved for later and this session is over. */
+    const val SAVED = 11
+
     // Actions a client asks the host for.
     const val BUY = 1
     const val HEAL = 2
@@ -41,6 +44,9 @@ object Wire {
     const val PAUSE = 5
     const val RESUME = 6
     const val RESTART = 7
+
+    /** Save the game for later and stop, for everyone. */
+    const val SAVE = 8
 
     /** Positions travel as 16-bit integers in eighths of an arena unit. */
     const val POS_SCALE = 8f
@@ -198,6 +204,15 @@ object Wire {
     }
 
     private const val MAX_OFFERED = 8
+
+    fun saved(stage: Int): ByteArray {
+        val buf = buffer(6)
+        begin(buf, SAVED)
+        buf.putShort(stage.toShort())
+        return finish(buf)
+    }
+
+    fun readSaved(bytes: ByteArray): Int = open(bytes).short.toInt()
 
     fun bye(): ByteArray {
         val buf = buffer(4)

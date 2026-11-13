@@ -12,6 +12,8 @@ New kinds of enemy keep turning up as the stages go by: ones that keep their dis
 
 Stage 5 brings the first boss, and another follows every five stages. After the fourth the line starts over, with tougher versions.
 
+Pausing shows the run so far beside the menu: kills, damage, shots, coins, hits taken and upgrades. In a team it is a table with a column per player, and whoever leads a row that is worth winning stands out. The same numbers come up when the run ends.
+
 There are four difficulties. Easy is for your first runs: slower and softer enemies, slower shots, ten health where Normal gives eight, more coins, and bosses with less than half their usual health. Normal is a fair fight. Hard and Impossible take all of that the other way.
 
 ![The Gyre, the boss at stage 20](docs/boss.png)
@@ -29,6 +31,8 @@ Each phone decides for itself what its own shots hit and what hits it, judged ag
 In a co-op game the top right corner shows how the phones are linked and the round trip between them, for example "Direct 12 ms". Direct means the phones talk straight over your Wi-Fi network; Wi-Fi, Bluetooth and Bluetooth LE mean the game goes through Nearby on that radio. Green is quick, amber is noticeable and red is slow; Bluetooth LE is always red, because it cannot keep up. If you do not see Direct, putting both phones on the same Wi-Fi network usually helps. Settings can hide the readout.
 
 If a phone drops out, the game waits 20 seconds for it to come back. The host can also choose to play on without it.
+
+To stop and carry on another day, anyone can pick Multiplayer Pause in the pause menu. The game is saved on the host's phone and everyone goes back to the menu. Next time the host opens Play Together, taps Continue, and the others join the usual way; each phone gets its own seat back. The run picks up in the shop before the stage you were on, with what everyone had then. The host's phone keeps that save after every shop anyway, so a flat battery does not cost you the run either. A run that ends, or that the host leaves on purpose, is not kept.
 
 ## Controllers
 
@@ -61,4 +65,4 @@ You need a JDK (17 or newer) and the Android SDK with platform 37.
 
 ## Known limits
 
-Co-op has been played on two phones (a Galaxy A71 and an A13), and the in-app updater has updated both. Games with more than two phones, the direct link, the NFC tap and controllers have been tested in code but not yet on real hardware. There is no sound yet, only vibration. The pictures above were drawn on a computer by the game's own rendering code at the A71's resolution, not captured from a phone.
+Co-op has been played on two phones (a Galaxy A71 and an A13), and the in-app updater has updated both. Games with more than two phones, saving a co-op game, the NFC tap and controllers have been tested in code but not yet on real hardware. There is no sound yet, only vibration. The pictures above were drawn on a computer by the game's own rendering code at the A71's resolution, not captured from a phone.

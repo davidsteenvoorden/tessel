@@ -29,6 +29,7 @@ class Snapshot {
 
     var bossType = -1
     var bossHealth = 0f
+    var bossesDown = 0
 
     /** Local clock when it arrived. */
     var arrivalNanos = 0L
@@ -53,6 +54,14 @@ class Snapshot {
     val coins = IntArray(MAX_PLAYERS)
     val earned = IntArray(MAX_PLAYERS)
     val kills = IntArray(MAX_PLAYERS)
+
+    // The run's statistics.
+    val fired = IntArray(MAX_PLAYERS)
+    val dealt = IntArray(MAX_PLAYERS)
+    val taken = IntArray(MAX_PLAYERS)
+    val downs = IntArray(MAX_PLAYERS)
+    val revived = IntArray(MAX_PLAYERS)
+    val bought = IntArray(MAX_PLAYERS)
 
     // What a client needs to predict its own player's movement and shots.
     val moveSpeed = FloatArray(MAX_PLAYERS)

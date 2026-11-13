@@ -36,6 +36,23 @@ class ShopView(
     val teamSize: Int = 1,
 )
 
+/** One player's column in the run's statistics. */
+class PlayerStats(
+    val name: String,
+    val you: Boolean,
+    /** False once their phone left the game for good. */
+    val present: Boolean,
+    val kills: Int,
+    val damage: Int,
+    val shots: Int,
+    val coins: Int,
+    val hitsTaken: Int,
+    val downed: Int,
+    val revives: Int,
+    val upgrades: Int,
+)
+
+/** A run so far, or as it ended. [kills] and [coins] are this phone's player's; [team] has everyone. */
 class RunSummary(
     val seconds: Int,
     val stage: Int,
@@ -43,4 +60,6 @@ class RunSummary(
     val coins: Int,
     val difficulty: Difficulty,
     val players: Int = 1,
+    val bosses: Int = 0,
+    val team: List<PlayerStats> = emptyList(),
 )

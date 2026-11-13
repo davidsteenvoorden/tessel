@@ -54,9 +54,10 @@ class CoopLoopTest {
         setUp(2)
     }
 
-    private fun setUp(count: Int) {
+    /** With [keepWorld], the world stays as it is: a saved run being carried on. */
+    private fun setUp(count: Int, keepWorld: Boolean = false) {
         players = count
-        world.reset(players = count, seed = 21)
+        if (!keepWorld) world.reset(players = count, seed = 21)
         for (p in 1 until count) world.remote[p] = true
         host = HostSession(world) { to, bytes, _ -> mail(bytes, HOST_PLAYER, to); true }
         for (p in 1 until count) host.connect(p)
@@ -442,6 +443,49 @@ class CoopLoopTest {
         val before = client.starvedFrames
         run(2f)
         assertEquals(0, client.starvedFrames - before)
+    }
+
+    @Test
+    fun everyPhoneSeesEveryonesStatistics() {
+        run(6f)
+        val s = client.latest!!
+        assertTrue(s.fired[HOST_PLAYER] > 0)
+        for (p in 0 until 2) {
+            assertEquals(world.players.kills[p], s.kills[p])
+            // Up to a snapshot behind the host.
+            assertEquals(world.players.fired[p].toFloat(), s.fired[p].toFloat(), 40f)
+            assertEquals(world.players.bought(p), s.bought[p])
+        }
+    }
+
+    @Test
+    fun aJoiningPhoneCanAskTheHostToSave() {
+        var asked = -1
+        host.onRequest = { asked = it }
+        run(0.2f)
+        client.action(Wire.SAVE)
+        run(0.2f)
+        assertEquals(Wire.SAVE, asked)
+    }
+
+    @Test
+    fun aSavedRunCarriesOnInTheShopOnEveryPhone() {
+        world.spawning = false
+        while (world.phase != Phase.SHOP) tick()
+        world.players.coins[CLIENT] = 321
+        val saved = dev.david.tessel.core.sim.Checkpoint.read(world.capture().write())!!
+
+        // Another day: the host's world comes back from the save and the phones link up again.
+        world.restore(saved, seed = 5) { true }
+        world.spawning = false
+        setUp(2, keepWorld = true)
+        host.announceStart()
+        run(0.5f)
+        val s = client.latest!!
+        assertEquals(Phase.SHOP, s.phase)
+        assertEquals(saved.stage, s.stage)
+        assertEquals(321, s.coins[CLIENT])
+        assertTrue(s.hasShop)
     }
 
     private companion object {

@@ -113,6 +113,10 @@ class World(seed: Long = 1L) {
      */
     val remote = BooleanArray(MAX_PLAYERS)
 
+    /** Bosses beaten this run, by the whole team. */
+    var bossesDown = 0
+        internal set
+
     /** Index of the boss in [enemies], or -1. Refreshed whenever indices can move. */
     var boss = -1
         private set
@@ -151,6 +155,7 @@ class World(seed: Long = 1L) {
         events.clear()
         boss = -1
         bossDue = -1
+        bossesDown = 0
         shownBossType = -1
         remote.fill(false)
         director.startStage()
@@ -215,6 +220,63 @@ class World(seed: Long = 1L) {
         director.startStage()
         bossDue = if (isBossStage()) BOSS_DELAY_TICKS else -1
         events.add(Events.STAGE_START, stage)
+    }
+
+    /**
+     * What a [Checkpoint] keeps of this run. Taken while the shop is open, or at
+     * the very start of a run; at any other moment the fight in progress is lost.
+     */
+    fun capture(): Checkpoint {
+        val cp = Checkpoint(difficulty, stage, tick, playerCount, phase == Phase.SHOP, bossesDown)
+        val pl = players
+        for (p in 0 until playerCount) {
+            cp.present[p] = pl.present[p]
+            cp.hp[p] = pl.hp[p]
+            cp.maxHp[p] = pl.maxHp[p]
+            cp.coins[p] = pl.coins[p]
+            cp.earned[p] = pl.earned[p]
+            cp.kills[p] = pl.kills[p]
+            cp.fired[p] = pl.fired[p]
+            cp.dealt[p] = pl.dealt[p]
+            cp.taken[p] = pl.taken[p]
+            cp.downs[p] = pl.downs[p]
+            cp.revived[p] = pl.revived[p]
+            pl.levels[p].copyInto(cp.levels[p])
+        }
+        if (cp.inShop) shop.keep(cp)
+        return cp
+    }
+
+    /**
+     * Carries on the run in [cp]: in its shop, or from its start. [seated]
+     * says which seats have a player this time; one who sat out last time,
+     * or went down, comes back at half health.
+     */
+    fun restore(cp: Checkpoint, seed: Long, seated: (Int) -> Boolean) {
+        reset(players = cp.players, seed = seed, difficulty = cp.difficulty)
+        val pl = players
+        for (p in 0 until cp.players) {
+            pl.maxHp[p] = cp.maxHp[p].coerceAtLeast(1)
+            pl.hp[p] = cp.hp[p].coerceAtMost(pl.maxHp[p])
+            pl.coins[p] = cp.coins[p]
+            pl.earned[p] = cp.earned[p]
+            pl.kills[p] = cp.kills[p]
+            pl.fired[p] = cp.fired[p]
+            pl.dealt[p] = cp.dealt[p]
+            pl.taken[p] = cp.taken[p]
+            pl.downs[p] = cp.downs[p]
+            pl.revived[p] = cp.revived[p]
+            cp.levels[p].copyInto(pl.levels[p])
+            pl.present[p] = seated(p)
+            if (!pl.present[p]) pl.hp[p] = 0 else if (pl.hp[p] <= 0) pl.hp[p] = max(1, pl.maxHp[p] / 2)
+        }
+        if (!cp.inShop) return
+        stage = cp.stage
+        tick = cp.tick
+        bossesDown = cp.bossesDown
+        coinBase = coinBaseFor(stage)
+        phase = Phase.SHOP
+        shop.bringBack(this, cp)
     }
 
     /** Skips straight to the start of [stage]. For tests and the debug stress rig. */
@@ -479,6 +541,7 @@ class World(seed: Long = 1L) {
             val dy = sin(a)
             bullets.add(nextId++, pl.x[p] + dx * muzzle, pl.y[p] + dy * muzzle, dx * speed, dy * speed, life, damage, radius, pierce, p)
         }
+        pl.fired[p] += n
         events.add(Events.SHOT, p, pl.x[p], pl.y[p], pl.aimX[p], pl.aimY[p])
     }
 
@@ -571,7 +634,10 @@ class World(seed: Long = 1L) {
         val e = enemies
         val def = Bestiary.of(e.type[j])
         val shielded = e.type[j] == Bestiary.APIARY && brains.escorts > 0
-        e.hp[j] -= damage * (if (shielded) SHIELDED_DAMAGE else 1f)
+        val dealt = damage * (if (shielded) SHIELDED_DAMAGE else 1f)
+        // Overkill does not count: a huge shot into a nearly dead enemy dealt what it had left.
+        if (owner in 0 until playerCount) players.dealt[owner] += min(dealt, max(e.hp[j], 0f))
+        e.hp[j] -= dealt
         e.flash[j] = FLASH_TICKS
         e.kx[j] += ux * Balance.KNOCKBACK / def.mass
         e.ky[j] += uy * Balance.KNOCKBACK / def.mass
@@ -596,6 +662,7 @@ class World(seed: Long = 1L) {
         }
         brains.died(j)
         if (def.boss) {
+            bossesDown++
             events.add(Events.BOSS_DOWN, e.type[j], e.x[j], e.y[j])
             // The rest of the stage's enemies scatter once the boss falls.
             if (phase == Phase.FIGHT) endFight()
@@ -690,6 +757,7 @@ class World(seed: Long = 1L) {
         val px = pl.x[p]
         val py = pl.y[p]
         pl.hp[p] -= 1
+        pl.taken[p]++
         pl.invuln[p] = INVULN_TICKS
         pl.hurt[p] = HURT_TICKS
         events.add(Events.PLAYER_HIT, p, px, py)
@@ -709,6 +777,7 @@ class World(seed: Long = 1L) {
 
         if (pl.hp[p] <= 0) {
             pl.hp[p] = 0
+            pl.downs[p]++
             events.add(Events.PLAYER_DOWN, p, px, py)
         }
     }
@@ -741,6 +810,13 @@ class World(seed: Long = 1L) {
                 pl.revive[p] = 0
                 pl.hp[p] = max(1, pl.maxHp[p] / 2)
                 pl.invuln[p] = INVULN_TICKS * 2
+                // Everyone who stood close shares the credit.
+                for (q in 0 until playerCount) {
+                    if (q == p || !pl.alive(q)) continue
+                    val dx = pl.x[q] - pl.x[p]
+                    val dy = pl.y[q] - pl.y[p]
+                    if (dx * dx + dy * dy < reach * reach) pl.revived[q]++
+                }
                 events.add(Events.REVIVED, p, pl.x[p], pl.y[p])
             }
         }

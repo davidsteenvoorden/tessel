@@ -76,6 +76,7 @@ object Protocol {
         buf.put(present.toByte())
         buf.put(w.bossType().toByte())
         buf.put((w.bossHealth() * 255).toInt().coerceIn(0, 255).toByte())
+        buf.put(w.bossesDown.coerceAtMost(255).toByte())
 
         for (p in 0 until w.playerCount) {
             Wire.putPos(buf, pl.x[p])
@@ -100,6 +101,13 @@ object Protocol {
             buf.putFloat(pl.damage(p))
             buf.put(pl.volley(p).toByte())
             buf.put(pl.pierce(p).toByte())
+            // The run's statistics, so every phone can show everyone's.
+            buf.putInt(pl.fired[p])
+            buf.putInt(pl.dealt[p].toInt())
+            buf.putShort(pl.taken[p].coerceAtMost(Short.MAX_VALUE.toInt()).toShort())
+            buf.put(pl.downs[p].coerceAtMost(255).toByte())
+            buf.put(pl.revived[p].coerceAtMost(255).toByte())
+            buf.putShort(pl.bought(p).toShort())
         }
 
         val e = w.enemies
@@ -191,6 +199,7 @@ object Protocol {
         s.present = buf.get().toInt() and 0xFF
         s.bossType = buf.get().toInt()
         s.bossHealth = (buf.get().toInt() and 0xFF) / 255f
+        s.bossesDown = buf.get().toInt() and 0xFF
 
         for (p in 0 until s.playerCount) {
             s.px[p] = Wire.getPos(buf)
@@ -214,6 +223,12 @@ object Protocol {
             s.damage[p] = buf.float
             s.volley[p] = buf.get().toInt()
             s.pierce[p] = buf.get().toInt()
+            s.fired[p] = buf.int
+            s.dealt[p] = buf.int
+            s.taken[p] = buf.short.toInt()
+            s.downs[p] = buf.get().toInt() and 0xFF
+            s.revived[p] = buf.get().toInt() and 0xFF
+            s.bought[p] = buf.short.toInt()
         }
 
         s.enemyCount = buf.short.toInt().coerceIn(0, MAX_ENEMIES)

@@ -32,9 +32,11 @@ import dev.david.tessel.core.net.Direct
 import dev.david.tessel.core.net.LocalAddress
 import dev.david.tessel.core.net.Pipe
 import dev.david.tessel.core.net.Wire
+import dev.david.tessel.core.sim.Checkpoint
 import dev.david.tessel.core.sim.MAX_PLAYERS
 import dev.david.tessel.platform.game.GameSurfaceView
 import dev.david.tessel.platform.game.Mode
+import dev.david.tessel.platform.store.CoopSave
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import java.io.IOException
@@ -48,8 +50,17 @@ data class FoundGame(val endpointId: String, val name: String, val code: String)
 sealed interface LobbyState {
     data object Idle : LobbyState
 
-    /** This phone hosts. [players] are the phones that joined, in seat order. [tapped] is the last phone sent the code by NFC. */
-    data class Hosting(val code: String, val players: List<String>, val problem: String? = null, val tapped: String? = null) : LobbyState
+    /**
+     * This phone hosts. [players] are the phones that joined, in seat order. [tapped] is the last phone sent the code by NFC.
+     * With [resume] set, it hosts a saved run.
+     */
+    data class Hosting(
+        val code: String,
+        val players: List<String>,
+        val problem: String? = null,
+        val tapped: String? = null,
+        val resume: Resume? = null,
+    ) : LobbyState
 
     /** Looking for games. With [invite] set, a tap told us which one, and it joins on its own. */
     data class Searching(val games: List<FoundGame>, val problem: String? = null, val invite: String? = null) : LobbyState
@@ -61,8 +72,11 @@ sealed interface LobbyState {
 
     /** A link dropped mid-game; these are the players being waited for. */
     data class Reconnecting(val names: List<String>, val host: Boolean) : LobbyState
-    data class Ended(val message: String) : LobbyState
+    data class Ended(val message: String, val title: String = "Game over") : LobbyState
 }
+
+/** A saved run being hosted again: who played in seats 1 and up last time, and which of those seats are filled now. */
+data class Resume(val stage: Int, val difficulty: Difficulty, val names: List<String>, val filled: List<Boolean>)
 
 /**
  * Finds the other phones and keeps the connections, using Nearby Connections:
@@ -91,7 +105,7 @@ class CoopLobby(private val activity: ComponentActivity, private val game: GameS
 
     val myName: String = deviceName()
 
-    private class Seat(var endpoint: String?, val name: String) {
+    private class Seat(var endpoint: String?, val name: String, val id: Long = 0L) {
         var connected = true
         var inFlight = 0L
         var inFlightSince = 0L
@@ -124,6 +138,24 @@ class CoopLobby(private val activity: ComponentActivity, private val game: GameS
 
     private val tap = TapReader(activity) { result -> onTap(result) }
 
+    /** The co-op run this phone hosted that can be carried on, if any. */
+    val save = CoopSave(activity.applicationContext)
+
+    /** Stays with this install, so a saved run can give each phone its own seat back. */
+    private val myId: Long = activity.getSharedPreferences("tessel", android.content.Context.MODE_PRIVATE).let { prefs ->
+        prefs.getLong(KEY_ID, 0L).takeIf { it != 0L } ?: SecureRandom().nextLong().let { if (it == 0L) 1L else it }.also {
+            prefs.edit().putLong(KEY_ID, it).apply()
+        }
+    }
+
+    // Host: the saved run being hosted again, and who sits where in the run being played (read on the game thread).
+    private var resuming: Checkpoint? = null
+    @Volatile private var seatIds = LongArray(MAX_PLAYERS)
+    @Volatile private var seatNames = Array(MAX_PLAYERS) { "" }
+
+    // Joining side: everyone's names by player number, from the host's last roster.
+    private var lastRoster: List<String> = emptyList()
+
     /** Debug builds can switch the direct link off, to compare against Nearby alone. */
     var directAllowed = true
 
@@ -150,6 +182,20 @@ class CoopLobby(private val activity: ComponentActivity, private val game: GameS
     )?.apply { setReferenceCounted(false) }
 
     init {
+        game.onCheckpoint = { cp ->
+            if (cp == null) {
+                save.clear()
+            } else {
+                val ids = seatIds
+                val names = seatNames
+                for (p in 0 until cp.players) {
+                    cp.ids[p] = ids[p]
+                    cp.names[p] = names[p]
+                }
+                save.write(cp)
+            }
+        }
+        game.onSaved = { cp -> main.post { savedForLater(cp.nextStage) } }
         TapInbox.name = myName
         activity.lifecycle.addObserver(object : DefaultLifecycleObserver {
             override fun onResume(owner: LifecycleOwner) {
@@ -202,8 +248,10 @@ class CoopLobby(private val activity: ComponentActivity, private val game: GameS
         }
     }
 
-    fun host() {
+    /** With [saved] set, hosts that run again instead of a new one. */
+    fun host(saved: Checkpoint? = null) {
         reset()
+        resuming = saved
         hosting = true
         code = newCode()
         publishHosting()
@@ -229,7 +277,7 @@ class CoopLobby(private val activity: ComponentActivity, private val game: GameS
         hostName = target.name
         wantCode = null
         stateFlow.value = LobbyState.Connecting(target.name)
-        nearby.requestConnection("$myName|join", target.endpointId, lifecycle)
+        nearby.requestConnection("$myName|join|$myId", target.endpointId, lifecycle)
             .addOnFailureListener { e ->
                 if (statusOf(e) == ConnectionsStatusCodes.STATUS_ALREADY_CONNECTED_TO_ENDPOINT) return@addOnFailureListener
                 stateFlow.value = LobbyState.Searching(found.values.toList(), "Could not connect to ${target.name}. Try again.")
@@ -239,6 +287,10 @@ class CoopLobby(private val activity: ComponentActivity, private val game: GameS
     /** Host only: starts the run on every phone. */
     fun start(difficulty: Difficulty) {
         if (!hosting || playing) return
+        resuming?.let {
+            startSaved(it)
+            return
+        }
         // Seats are packed so players are numbered 1, 2, 3... with no gaps.
         val taken = seats.filterNotNull().filter { it.connected }
         if (taken.isEmpty()) return
@@ -248,18 +300,55 @@ class CoopLobby(private val activity: ComponentActivity, private val game: GameS
         stopLooking()
         playing = true
         updateTap()
+        val names = listOf(myName) + taken.map { it.name }
+        seatNames = Array(MAX_PLAYERS) { names.getOrElse(it) { "" } }
+        seatIds = LongArray(MAX_PLAYERS) { if (it == 0) myId else seats[it]?.id ?: 0L }
+        broadcastRoster(names)
+        game.names = names
         stateFlow.value = LobbyState.Playing(host = true)
         game.startCoopHost(toPlayers, difficulty, players)
         for (k in 1 until players) offerDirect(k)
     }
+
+    /** Carries on the saved run with whoever came back. Seats nobody filled stay empty. */
+    private fun startSaved(cp: Checkpoint) {
+        val seated = BooleanArray(cp.players) { it == 0 || seats[it]?.connected == true }
+        if (seated.count { it } < 2) return
+        stopLooking()
+        playing = true
+        resuming = null
+        updateTap()
+        val names = List(cp.players) { k -> if (k == 0) myName else seats[k]?.takeIf { seated[k] }?.name ?: cp.names[k] }
+        seatNames = Array(MAX_PLAYERS) { names.getOrElse(it) { "" } }
+        seatIds = LongArray(MAX_PLAYERS) { k ->
+            when {
+                k == 0 -> myId
+                k < cp.players && seated[k] -> seats[k]?.id ?: 0L
+                k < cp.players -> cp.ids[k]
+                else -> 0L
+            }
+        }
+        broadcastRoster(names)
+        game.names = names
+        stateFlow.value = LobbyState.Playing(host = true)
+        game.continueCoopHost(toPlayers, cp, seated)
+        for (k in 1 until cp.players) if (seated[k]) offerDirect(k)
+    }
+
+    /** Throws away the saved run. */
+    fun discardSave() = save.clear()
 
     /** Host only, while waiting on a dropped phone: play on without it. */
     fun continueWithout() {
         for (seat in waiting.keys.toList()) giveUpOn(seat)
     }
 
-    /** Leaving on purpose: tells everyone, then drops everything. */
-    fun leave() {
+    /**
+     * Leaving on purpose: tells everyone, then drops everything. A host who
+     * [abandons][abandon] a run also throws away its save.
+     */
+    fun leave(abandon: Boolean = false) {
+        if (abandon && hosting && playing) save.clear()
         closePipes()
         val bye = Wire.bye()
         val ends = ArrayList<String>()
@@ -282,6 +371,7 @@ class CoopLobby(private val activity: ComponentActivity, private val game: GameS
 
     private fun reset() {
         closePipes()
+        resuming = null
         stopLooking()
         hostEndpoint?.let { nearby.disconnectFromEndpoint(it) }
         for (s in seats) s?.endpoint?.let { nearby.disconnectFromEndpoint(it) }
@@ -325,11 +415,19 @@ class CoopLobby(private val activity: ComponentActivity, private val game: GameS
 
     private fun publishHosting(problem: String? = null, tapped: String? = null) {
         val names = seats.filterNotNull().filter { it.connected }.map { it.name }
-        stateFlow.value = LobbyState.Hosting(code, names, problem, tapped)
+        val resume = resuming?.let { cp ->
+            Resume(
+                cp.nextStage,
+                cp.difficulty,
+                names = (1 until cp.players).map { k -> seats[k]?.takeIf { it.connected }?.name ?: cp.names[k] },
+                filled = (1 until cp.players).map { k -> seats[k]?.connected == true },
+            )
+        }
+        stateFlow.value = LobbyState.Hosting(code, names, problem, tapped, resume)
     }
 
-    private fun broadcastRoster() {
-        val names = listOf(myName) + seats.filterNotNull().filter { it.connected }.map { it.name }
+    /** [names] by player number, host first; by default everyone in the lobby. */
+    private fun broadcastRoster(names: List<String> = listOf(myName) + seats.filterNotNull().filter { it.connected }.map { it.name }) {
         val bytes = Wire.roster(names)
         for (s in seats) if (s != null && s.connected) s.endpoint?.let { nearby.sendPayload(it, Payload.fromBytes(bytes)) }
     }
@@ -376,21 +474,29 @@ class CoopLobby(private val activity: ComponentActivity, private val game: GameS
             }
             val parts = info.endpointName.split('|')
             val name = parts.getOrElse(0) { "Player" }
+            val id = if (parts.getOrNull(1) == "join") parts.getOrNull(2)?.toLongOrNull() ?: 0L else 0L
+            val saved = resuming
+            val free = { k: Int -> seats[k] == null && k !in arriving.values }
             val seat = if (parts.getOrNull(1) == "back") {
                 // A phone that dropped out mid-game, coming back to its own seat.
                 val s = parts.getOrNull(2)?.toIntOrNull() ?: -1
                 if (playing && s in waiting.keys) s else -1
-            } else if (!playing) {
-                (1 until MAX_PLAYERS).firstOrNull { seats[it] == null && it !in arriving.values } ?: -1
-            } else {
+            } else if (playing) {
                 -1
+            } else if (saved != null) {
+                // A saved run: each phone gets its own seat back; another phone may take a seat nobody came back to.
+                (1 until saved.players).firstOrNull { free(it) && id != 0L && saved.ids[it] == id }
+                    ?: (1 until saved.players).firstOrNull { k -> free(k) && !comingBack(saved, k) }
+                    ?: -1
+            } else {
+                (1 until MAX_PLAYERS).firstOrNull(free) ?: -1
             }
             if (seat < 0) {
                 nearby.rejectConnection(endpointId)
                 return
             }
             arriving[endpointId] = seat
-            if (seats[seat] == null) seats[seat] = Seat(null, name).apply { connected = false }
+            if (seats[seat] == null) seats[seat] = Seat(null, name, id).apply { connected = false }
             nearby.acceptConnection(endpointId, payloads)
         }
 
@@ -502,6 +608,7 @@ class CoopLobby(private val activity: ComponentActivity, private val game: GameS
             when (Wire.typeOf(bytes)) {
                 Wire.ROSTER -> {
                     val names = Wire.readRoster(bytes)
+                    lastRoster = names
                     val now = stateFlow.value
                     if (now is LobbyState.Joined) stateFlow.value = now.copy(players = names)
                 }
@@ -514,12 +621,16 @@ class CoopLobby(private val activity: ComponentActivity, private val game: GameS
                     val start = Wire.readStart(bytes)
                     mySeat = start.you
                     playing = true
+                    game.names = lastRoster
                     stateFlow.value = LobbyState.Playing(host = false)
                     game.startCoopClient(toHost, start.you, start.players)
                     savedOffer?.let {
                         savedOffer = null
                         dial(it)
                     }
+                }
+                Wire.SAVED -> if (!hosting) {
+                    end("$hostName saved the game. It carries on at stage ${Wire.readSaved(bytes)} when they host it again and you join.", SAVED_TITLE)
                 }
                 Wire.DIRECT_OFFER -> {
                     if (hosting || !directAllowed) return
@@ -590,10 +701,38 @@ class CoopLobby(private val activity: ComponentActivity, private val game: GameS
 
     private val hostGone = Runnable { end("Lost the connection to $hostName.") }
 
-    private fun end(message: String) {
+    private fun end(message: String, title: String = "Game over") {
         reset()
-        stateFlow.value = LobbyState.Ended(message)
+        stateFlow.value = LobbyState.Ended(message, title)
         game.partnerGone()
+    }
+
+    /**
+     * Host: a seat in a saved run is kept for its own phone while that phone
+     * might still turn up, as long as there is another empty seat for a
+     * newcomer. Only the last free seats go to other phones.
+     */
+    private fun comingBack(cp: Checkpoint, k: Int): Boolean {
+        if (cp.ids[k] == 0L) return false
+        val open = (1 until cp.players).count { seats[it] == null && it !in arriving.values }
+        val awaited = (1 until cp.players).count { j -> seats[j] == null && j !in arriving.values && cp.ids[j] != 0L }
+        return open > 0 && awaited < open
+    }
+
+    /** Host: the run is saved, to carry on at [stage]. Tells everyone, then ends the session; the game screen is already home. */
+    private fun savedForLater(stage: Int) {
+        val note = Wire.saved(stage)
+        val ends = seats.mapNotNull { it?.endpoint }
+        closePipes()
+        for (to in ends) nearby.sendPayload(to, Payload.fromBytes(note))
+        // Give the message a moment to go out before the links close.
+        main.postDelayed({ ends.forEach { nearby.disconnectFromEndpoint(it) } }, 300)
+        seats.fill(null)
+        reset()
+        stateFlow.value = LobbyState.Ended(
+            "The game is saved and carries on at stage $stage. To play on, open Play Together and tap Continue. The others join the usual way.",
+            SAVED_TITLE,
+        )
     }
 
     // Direct link, host side.
@@ -870,6 +1009,8 @@ class CoopLobby(private val activity: ComponentActivity, private val game: GameS
 
     private companion object {
         const val TAG = "Tessel"
+        const val KEY_ID = "player_id"
+        const val SAVED_TITLE = "Saved for later"
 
         /** Fixed rather than the package name: debug builds carry a suffix and must still find release builds. */
         const val SERVICE_ID = "dev.david.tessel.coop"

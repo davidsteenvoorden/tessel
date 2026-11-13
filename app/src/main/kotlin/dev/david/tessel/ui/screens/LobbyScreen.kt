@@ -51,6 +51,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import dev.david.tessel.core.content.Difficulty
+import dev.david.tessel.core.sim.Checkpoint
 import dev.david.tessel.platform.net.CoopLobby
 import dev.david.tessel.platform.net.FoundGame
 import dev.david.tessel.platform.net.LobbyState
@@ -81,6 +82,7 @@ import kotlinx.coroutines.delay
 fun LobbyScreen(
     lobby: CoopLobby,
     state: LobbyState,
+    saved: Checkpoint?,
     settings: Settings,
     onDifficulty: (Difficulty) -> Unit,
     onBack: () -> Unit,
@@ -167,7 +169,7 @@ fun LobbyScreen(
                             }
                         }
                     }
-                    else -> Stage(lobby, state, settings, onDifficulty)
+                    else -> Stage(lobby, state, saved, settings, onDifficulty)
                 }
             }
         }
@@ -175,7 +177,7 @@ fun LobbyScreen(
 }
 
 @Composable
-private fun Stage(lobby: CoopLobby, state: LobbyState, settings: Settings, onDifficulty: (Difficulty) -> Unit) {
+private fun Stage(lobby: CoopLobby, state: LobbyState, saved: Checkpoint?, settings: Settings, onDifficulty: (Difficulty) -> Unit) {
     val c = Theme.colors
     val context = LocalContext.current
     var nfc by remember { mutableStateOf(TapReader.state(context)) }
@@ -187,10 +189,15 @@ private fun Stage(lobby: CoopLobby, state: LobbyState, settings: Settings, onDif
     }
     when (state) {
         LobbyState.Idle, is LobbyState.Reconnecting, is LobbyState.Playing -> {
+            if (saved != null) {
+                SavedGame(saved, onContinue = { lobby.host(saved) }, onDiscard = lobby::discardSave)
+                Spacer(Modifier.height(Space.x6))
+            }
             Text("One phone hosts, up to seven join. Every phone needs Tessel, Bluetooth and Wi-Fi. No internet needed.", Type.subhead, c.ink2)
             Spacer(Modifier.height(Space.x5))
             Row(horizontalArrangement = Arrangement.spacedBy(Space.x3)) {
-                ChoiceTile("Host", "Start a game and get a code for your friends.", Modifier.weight(1f), lobby::host)
+                val hostDetail = if (saved != null) "Start a new game. It replaces the saved one." else "Start a game and get a code for your friends."
+                ChoiceTile("Host", hostDetail, Modifier.weight(1f)) { lobby.host() }
                 ChoiceTile("Join", "Find a game a friend is hosting nearby.", Modifier.weight(1f), lobby::join)
             }
             Spacer(Modifier.height(Space.x4))
@@ -222,7 +229,25 @@ private fun Stage(lobby: CoopLobby, state: LobbyState, settings: Settings, onDif
                 Text(it, Type.footnote, c.danger)
             }
             Spacer(Modifier.height(Space.x4))
-            if (state.players.isEmpty()) {
+            val resume = state.resume
+            if (resume != null) {
+                Group(title = "Saved Game") {
+                    PlayerRow(lobby.myName, "Host")
+                    resume.names.forEachIndexed { i, name ->
+                        Divider()
+                        PlayerRow(name, if (resume.filled[i]) "Back" else "Not here yet")
+                    }
+                }
+                Spacer(Modifier.height(Space.x2))
+                Text(
+                    "Carries on at stage ${resume.stage} on ${resume.difficulty.label}. Each phone gets its own seat back; anyone who does not come sits this one out.",
+                    Type.footnote,
+                    c.ink3,
+                    Modifier.padding(start = Space.x1),
+                )
+                Spacer(Modifier.height(Space.x5))
+                PrimaryButton("Continue", { lobby.start(settings.difficulty) }, Modifier.fillMaxWidth(), enabled = resume.filled.any { it })
+            } else if (state.players.isEmpty()) {
                 WaitingLine("Waiting for players. Up to seven can join.")
             } else {
                 Group(title = "Players") {
@@ -285,9 +310,43 @@ private fun Stage(lobby: CoopLobby, state: LobbyState, settings: Settings, onDif
         }
 
         is LobbyState.Ended -> {
-            Explain("Game over", state.message)
+            Explain(state.title, state.message)
             Spacer(Modifier.height(Space.x5))
             PrimaryButton("OK", lobby::dismiss, Modifier.fillMaxWidth())
+        }
+    }
+}
+
+/** The co-op run this phone saved: where it stands and who was in it. Discarding asks once more. */
+@Composable
+internal fun SavedGame(saved: Checkpoint, onContinue: () -> Unit, onDiscard: () -> Unit) {
+    val c = Theme.colors
+    var discarding by remember { mutableStateOf(false) }
+    val others = (1 until saved.players).map { saved.names[it] }.filter { it.isNotBlank() }
+    val with = when (others.size) {
+        0 -> ""
+        1 -> "With ${others[0]}. "
+        else -> "With ${others.dropLast(1).joinToString(", ")} and ${others.last()}. "
+    }
+    val where = if (saved.inShop) "Picks up in the shop before it." else "Starts over from the beginning."
+    Group(title = "Saved Game") {
+        Column(Modifier.fillMaxWidth().padding(Space.x4)) {
+            Text("Stage ${saved.nextStage}, ${saved.difficulty.label}", Type.headline, c.ink)
+            Text(with + where, Type.subhead, c.ink2)
+            Spacer(Modifier.height(Space.x4))
+            if (!discarding) {
+                Row(horizontalArrangement = Arrangement.spacedBy(Space.x3)) {
+                    SecondaryButton("Discard", { discarding = true }, Modifier.weight(1f), tint = c.danger)
+                    PrimaryButton("Continue", onContinue, Modifier.weight(1f))
+                }
+            } else {
+                Text("Discard the saved game? It cannot be brought back.", Type.subhead, c.ink)
+                Spacer(Modifier.height(Space.x3))
+                Row(horizontalArrangement = Arrangement.spacedBy(Space.x3)) {
+                    SecondaryButton("Cancel", { discarding = false }, Modifier.weight(1f))
+                    SecondaryButton("Discard", onDiscard, Modifier.weight(1f), tint = c.danger)
+                }
+            }
         }
     }
 }

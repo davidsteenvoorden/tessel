@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -60,33 +61,38 @@ fun RunOverCard(visible: Boolean, summary: RunSummary?, newBest: Boolean, onAgai
             .pointerInput(Unit) { detectTapGestures { } },
         contentAlignment = Alignment.Center,
     ) {
-        Column(
+        // How far the run got, and what to do next, on the left; how it went, on the right.
+        Row(
             Modifier
                 .graphicsLayer {
                     val s = 0.96f + 0.04f * shown.value
                     scaleX = s
                     scaleY = s
                 }
-                .width(480.dp)
+                .padding(horizontal = Space.x6)
+                .widthIn(max = 820.dp)
                 .clip(RoundedCornerShape(Corner.sheet))
                 .background(c.surface)
                 .padding(Space.x6),
+            horizontalArrangement = Arrangement.spacedBy(Space.x8),
         ) {
-            Text("Run over", Type.title1, c.ink)
-            val sub = summary.difficulty.label + if (newBest) " · New best" else ""
-            Text(sub, Type.subhead, c.ink2)
-            Spacer(Modifier.height(Space.x5))
-            Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.padding(end = Space.x4)) {
-                Stat("Stage", summary.stage.toString(), Modifier.weight(1f))
-                Stat("Time", clock(summary.seconds), Modifier.weight(1f))
-                Stat("Kills", summary.kills.toString(), Modifier.weight(1f))
-                Stat("Coins", summary.coins.toString(), Modifier.weight(1f))
+            Column(Modifier.width(300.dp)) {
+                Text("Run over", Type.title1, c.ink)
+                val sub = summary.difficulty.label + if (newBest) " · New best" else ""
+                Text(sub, Type.subhead, c.ink2)
+                Spacer(Modifier.height(Space.x5))
+                Row {
+                    Stat("Stage", summary.stage.toString(), Modifier.weight(1f))
+                    Stat("Time", clock(summary.seconds), Modifier.weight(1f))
+                    if (summary.bosses > 0) Stat(if (summary.bosses == 1) "Boss" else "Bosses", summary.bosses.toString(), Modifier.weight(1f))
+                }
+                Spacer(Modifier.height(Space.x6))
+                Row(horizontalArrangement = Arrangement.spacedBy(Space.x3)) {
+                    SecondaryButton("Home", onHome, Modifier.weight(1f))
+                    PrimaryButton("Play Again", onAgain, Modifier.weight(1f))
+                }
             }
-            Spacer(Modifier.height(Space.x6))
-            Row(horizontalArrangement = Arrangement.spacedBy(Space.x3)) {
-                SecondaryButton("Home", onHome, Modifier.weight(1f))
-                PrimaryButton("Play Again", onAgain, Modifier.weight(1f))
-            }
+            RunStats(summary, Modifier.weight(1f, fill = false).padding(top = Space.x2), header = false)
         }
     }
 }

@@ -81,6 +81,23 @@ class Shop {
         return true
     }
 
+    internal fun keep(cp: Checkpoint) {
+        for (p in 0 until cp.players) {
+            stock[p].copyInto(cp.stock[p])
+            cp.rerolls[p] = rerolls[p]
+            cp.heals[p] = heals[p]
+        }
+    }
+
+    /** Puts back the stock a [Checkpoint] kept; a seat with none gets a fresh one. */
+    internal fun bringBack(w: World, cp: Checkpoint) {
+        for (p in 0 until cp.players) {
+            rerolls[p] = cp.rerolls[p]
+            heals[p] = cp.heals[p]
+            if (cp.stock[p].all { it < 0 }) restock(w, p) else cp.stock[p].copyInto(stock[p])
+        }
+    }
+
     private fun restock(w: World, p: Int) {
         var n = 0
         for (u in 0 until Upgrades.count) {

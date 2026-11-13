@@ -26,6 +26,7 @@ import dev.david.tessel.core.net.HostSession
 import dev.david.tessel.core.net.Snapshot
 import dev.david.tessel.core.net.Wire
 import dev.david.tessel.core.sim.Bot
+import dev.david.tessel.core.sim.Checkpoint
 import dev.david.tessel.core.sim.Events
 import dev.david.tessel.core.sim.MAX_PLAYERS
 import dev.david.tessel.core.sim.Phase
@@ -96,6 +97,23 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
     val shop: StateFlow<ShopView?> = shopFlow
     private val summaryFlow = MutableStateFlow<RunSummary?>(null)
     val summary: StateFlow<RunSummary?> = summaryFlow
+
+    /** The run so far, refreshed each time the game pauses. */
+    private val statsFlow = MutableStateFlow<RunSummary?>(null)
+    val runStats: StateFlow<RunSummary?> = statsFlow
+
+    /** Co-op names by player number, for the statistics. Set by the lobby before a run. */
+    @Volatile var names: List<String> = emptyList()
+
+    /**
+     * Host of a co-op run: called on the game thread with each fresh
+     * [Checkpoint] (when the shop opens, when it closes, when a run starts),
+     * or with null when the run is over and there is nothing left to keep.
+     */
+    var onCheckpoint: ((Checkpoint?) -> Unit)? = null
+
+    /** Host: the run was saved for later at [Checkpoint]. Everyone stops here. Game thread. */
+    var onSaved: ((Checkpoint) -> Unit)? = null
     private val roleFlow = MutableStateFlow(Role.SOLO)
     val role: StateFlow<Role> = roleFlow
 
@@ -126,6 +144,7 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
     private var client: ClientSession? = null
     private var loopback: LoopbackHost? = null
     private var me = HOST_PLAYER
+    private var checkpoint: Checkpoint? = null
 
     /** Host: bit p set while player p's phone is out of reach. Client: bit 0 while the host is. */
     private var unreachable = 0
@@ -167,7 +186,39 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
             it.onRequest = ::onPartnerAsk
             it.announceStart()
         }
+        keep()
         freshRun()
+    }
+
+    /** Host: carries on a saved co-op run. [seated] marks the seats with a phone in them this time. */
+    fun continueCoopHost(link: HostLink, saved: Checkpoint, seated: BooleanArray) = onGameThread {
+        dropCoop()
+        becomeRole(Role.HOST)
+        world.restore(saved, SystemClock.elapsedRealtimeNanos()) { it == HOST_PLAYER || seated.getOrElse(it) { false } }
+        for (p in 1 until world.playerCount) world.remote[p] = true
+        host = HostSession(world, link::send).also {
+            for (p in 1 until world.playerCount) if (world.players.present[p]) it.connect(p)
+            it.onRequest = ::onPartnerAsk
+            it.announceStart()
+        }
+        keep()
+        freshRun()
+        if (world.phase == Phase.SHOP) {
+            publishShop()
+            enter(Mode.SHOP)
+        }
+    }
+
+    /**
+     * Co-op: saves the run for later and ends it for everyone. A joining
+     * phone asks the host, who does the saving.
+     */
+    fun saveForLater() = onGameThread {
+        when (playingAs) {
+            Role.CLIENT -> client?.action(Wire.SAVE)
+            Role.HOST -> saveAndStop()
+            Role.SOLO -> Unit
+        }
     }
 
     fun startCoopClient(link: Link, you: Int, players: Int) = onGameThread {
@@ -426,6 +477,8 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
             if (h != null) {
                 if (current == Mode.SHOP && h.allReady()) {
                     h.clearReady()
+                    // What everyone bought is in now; this is where a saved run picks up.
+                    keep()
                     world.nextStage()
                     restartClock()
                     enter(Mode.PLAYING)
@@ -472,6 +525,69 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
         }
     }
 
+    /** Host: takes a checkpoint of the run as it is now and hands it on to be stored. */
+    private fun keep() {
+        if (playingAs != Role.HOST) return
+        val cp = world.capture()
+        checkpoint = cp
+        onCheckpoint?.invoke(cp)
+    }
+
+    /** Host: in the shop the run is kept as it is; mid-stage, as it was when that stage's shop closed. */
+    private fun saveAndStop() {
+        if (playingAs != Role.HOST) return
+        if (world.phase == Phase.SHOP) keep()
+        val cp = checkpoint ?: world.capture().also { onCheckpoint?.invoke(it) }
+        onSaved?.invoke(cp)
+        dropCoop()
+        shards.clear()
+        shopFlow.value = null
+        statsFlow.value = null
+        enter(Mode.HOME)
+    }
+
+    /** Everyone's statistics so far, from the host's world or, on a joining phone, its newest snapshot. */
+    private fun summarize(): RunSummary? {
+        val c = client
+        val known = names
+        if (playingAs == Role.CLIENT) {
+            val s = c?.latest ?: return null
+            val team = (0 until s.playerCount).map { p ->
+                PlayerStats(
+                    name = known.getOrNull(p) ?: "Player ${p + 1}",
+                    you = p == me,
+                    present = s.present and (1 shl p) != 0,
+                    kills = s.kills[p],
+                    damage = s.dealt[p],
+                    shots = s.fired[p],
+                    coins = s.earned[p],
+                    hitsTaken = s.taken[p],
+                    downed = s.downs[p],
+                    revives = s.revived[p],
+                    upgrades = s.bought[p],
+                )
+            }
+            return RunSummary(s.tick / TICK_HZ, s.stage, s.kills[me], s.earned[me], s.difficulty, Integer.bitCount(s.present), s.bossesDown, team)
+        }
+        val pl = world.players
+        val team = (0 until world.playerCount).map { p ->
+            PlayerStats(
+                name = if (world.playerCount == 1) "You" else known.getOrNull(p) ?: "Player ${p + 1}",
+                you = p == me,
+                present = pl.present[p],
+                kills = pl.kills[p],
+                damage = pl.dealt[p].toInt(),
+                shots = pl.fired[p],
+                coins = pl.earned[p],
+                hitsTaken = pl.taken[p],
+                downed = pl.downs[p],
+                revives = pl.revived[p],
+                upgrades = pl.bought(p),
+            )
+        }
+        return RunSummary(world.tick / TICK_HZ, world.stage, pl.kills[me], pl.earned[me], world.difficulty, world.presentCount(), world.bossesDown, team)
+    }
+
     /** Turns what happened this frame into shards, haptics and menu changes, then forgets it. */
     private fun react(ev: Events, now: Long) {
         for (i in 0 until ev.count) {
@@ -496,21 +612,19 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
                 Events.REVIVED -> if (ev.who[i] == me) haptics.hurt()
                 Events.SHOP_OPEN -> if (playingAs != Role.CLIENT) {
                     host?.clearReady()
+                    keep()
                     publishShop()
                     enter(Mode.SHOP)
                 }
                 Events.RUN_OVER -> {
                     haptics.down()
                     if (playingAs != Role.CLIENT) {
-                        val pl = world.players
-                        summaryFlow.value = RunSummary(
-                            seconds = world.tick / TICK_HZ,
-                            stage = world.stage,
-                            kills = pl.kills[me],
-                            coins = pl.earned[me],
-                            difficulty = world.difficulty,
-                            players = world.presentCount(),
-                        )
+                        summaryFlow.value = summarize()
+                        if (playingAs == Role.HOST) {
+                            // Nothing left to carry on.
+                            checkpoint = null
+                            onCheckpoint?.invoke(null)
+                        }
                         enter(Mode.OVER)
                     }
                 }
@@ -546,16 +660,7 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
             else -> Mode.PLAYING
         }
         if (wanted == Mode.SHOP) publishClientShop(s)
-        if (wanted == Mode.OVER && current != Mode.OVER) {
-            summaryFlow.value = RunSummary(
-                seconds = s.tick / TICK_HZ,
-                stage = s.stage,
-                kills = s.kills[me],
-                coins = s.earned[me],
-                difficulty = s.difficulty,
-                players = Integer.bitCount(s.present),
-            )
-        }
+        if (wanted == Mode.OVER && current != Mode.OVER) summaryFlow.value = summarize()
         if (wanted != current) {
             if (wanted == Mode.PLAYING) restartClock()
             enter(wanted)
@@ -597,6 +702,7 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
     private fun onPartnerAsk(kind: Int) {
         when (kind) {
             Wire.PAUSE -> if (current == Mode.PLAYING) enter(Mode.PAUSED)
+            Wire.SAVE -> saveAndStop()
             Wire.RESUME -> if (current == Mode.PAUSED && unreachable == 0) {
                 restartClock()
                 enter(Mode.PLAYING)
@@ -612,6 +718,7 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
         for (p in 1 until world.playerCount) world.remote[p] = true
         for (p in gone.indices) if (gone[p]) world.removePlayer(p)
         host?.announceStart()
+        keep()
         freshRun()
     }
 
@@ -630,6 +737,7 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
     }
 
     private fun dropCoop() {
+        checkpoint = null
         host = null
         client = null
         loopback = null
@@ -734,6 +842,7 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
     }
 
     private fun enter(mode: Mode) {
+        if (mode == Mode.PAUSED) statsFlow.value = summarize()
         current = mode
         modeFlow.value = mode
     }

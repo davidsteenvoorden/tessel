@@ -43,6 +43,15 @@ import dev.david.tessel.platform.update.Updater
 import dev.david.tessel.ui.screens.HomeScreen
 import dev.david.tessel.ui.screens.SettingsScreen
 import dev.david.tessel.ui.screens.ShopPanel
+import dev.david.tessel.ui.screens.PausePanel
+import dev.david.tessel.ui.screens.RunOverCard
+import dev.david.tessel.ui.screens.SavedGame
+import dev.david.tessel.platform.game.PlayerStats
+import dev.david.tessel.platform.game.RunSummary
+import dev.david.tessel.core.sim.Checkpoint
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.unit.dp
 import dev.david.tessel.ui.theme.TesselTheme
 import org.junit.Rule
 import org.junit.Test
@@ -225,6 +234,60 @@ class Screenshots {
         compose.mainClock.advanceTimeBy(3000)
         compose.waitForIdle()
         save(compose.onRoot().captureToImage().asAndroidBitmap(), "shop.png")
+    }
+
+    private fun team(n: Int, stage: Int): RunSummary {
+        val names = listOf("Galaxy A71", "Sam", "Noor's A13", "Jules", "Ava", "Teo", "Mika", "Lou")
+        val team = List(n) { p ->
+            PlayerStats(
+                name = names[p], you = p == 1, present = p != 3 || n < 4,
+                kills = 180 + p * 47 % 120, damage = 9_400 + p * 2_731 % 9_000, shots = 2_900 + p * 611 % 1_500,
+                coins = 640 + p * 93 % 300, hitsTaken = 3 + p * 5 % 9, downed = p % 3, revives = (p * 2 + 1) % 4,
+                upgrades = 14 + p % 5,
+            )
+        }
+        return RunSummary(seconds = stage * 64 + 13, stage = stage, kills = team[minOf(1, n - 1)].kills, coins = team[minOf(1, n - 1)].coins,
+            difficulty = Difficulty.NORMAL, players = n, bosses = stage / 5, team = if (n == 1) listOf(team[0].let {
+                PlayerStats("You", true, true, it.kills, it.damage, it.shots, it.coins, it.hitsTaken, 0, 0, it.upgrades)
+            }) else team)
+    }
+
+    @Test
+    fun pauseAndRunOver() {
+        val scene = Scene(players = 2, stage = 7, seed = 707, palette = Palette.Dark, density = density)
+        scene.play(10f)
+        val arena = draw(scene, Palette.Dark)
+        var page by mutableStateOf(0)
+        compose.setContent {
+            TesselTheme {
+                Box(Modifier.fillMaxSize()) {
+                    Image(arena.asImageBitmap(), null, Modifier.fillMaxSize(), contentScale = ContentScale.FillBounds)
+                    when (page) {
+                        0 -> Sheet(visible = true, onDismiss = {}) { PausePanel(false, true, team(1, 7), {}, {}, {}, {}) }
+                        1, 2 -> Sheet(visible = true, onDismiss = {}) { PausePanel(true, true, team(4, 7), {}, {}, {}, {}) }
+                        3 -> RunOverCard(true, team(1, 9), newBest = true, onAgain = {}, onHome = {})
+                        4 -> RunOverCard(true, team(8, 12), newBest = false, onAgain = {}, onHome = {})
+                        else -> Box(Modifier.fillMaxSize().padding(48.dp)) {
+                            val cp = Checkpoint(Difficulty.HARD, 6, 6 * 3900, 3, true, 1)
+                            cp.names[1] = "Sam"
+                            cp.names[2] = "Noor's A13"
+                            SavedGame(cp, {}, {})
+                        }
+                    }
+                }
+            }
+        }
+        val names = listOf("pause-solo", "pause-team", "pause-save", "over-solo", "over-team", "saved-game")
+        for (k in names.indices) {
+            page = k
+            compose.mainClock.advanceTimeBy(1500)
+            if (k == 2) {
+                compose.onNodeWithText("Multiplayer Pause").performClick()
+                compose.mainClock.advanceTimeBy(500)
+            }
+            compose.waitForIdle()
+            save(compose.onRoot().captureToImage().asAndroidBitmap(), "${names[k]}.png", checks)
+        }
     }
 
     @Test

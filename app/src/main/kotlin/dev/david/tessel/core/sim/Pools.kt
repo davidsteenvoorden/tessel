@@ -39,10 +39,20 @@ class PlayerState {
     val earned = IntArray(MAX_PLAYERS)
     val kills = IntArray(MAX_PLAYERS)
 
+    // For the run's statistics: bullets fired, damage dealt, hits taken, times downed, teammates revived.
+    val fired = IntArray(MAX_PLAYERS)
+    val dealt = FloatArray(MAX_PLAYERS)
+    val taken = IntArray(MAX_PLAYERS)
+    val downs = IntArray(MAX_PLAYERS)
+    val revived = IntArray(MAX_PLAYERS)
+
     /** Shop upgrade levels, indexed by [Upgrades] id. */
     val levels = Array(MAX_PLAYERS) { IntArray(Upgrades.count) }
 
     fun alive(i: Int) = hp[i] > 0 && present[i]
+
+    /** Upgrade levels bought so far, all kinds together. */
+    fun bought(p: Int) = levels[p].sum()
 
     fun damage(p: Int) = scaled(p, Upgrades.DAMAGE, Balance.BULLET_DAMAGE)
     fun fireRate(p: Int) = scaled(p, Upgrades.FIRE_RATE, Balance.FIRE_RATE)
@@ -77,6 +87,11 @@ class PlayerState {
             coins[i] = 0
             earned[i] = 0
             kills[i] = 0
+            fired[i] = 0
+            dealt[i] = 0f
+            taken[i] = 0
+            downs[i] = 0
+            revived[i] = 0
             levels[i].fill(0)
         }
     }

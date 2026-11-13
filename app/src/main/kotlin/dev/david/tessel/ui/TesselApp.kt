@@ -67,6 +67,8 @@ fun TesselApp(game: GameSurfaceView, lobby: CoopLobby, store: SettingsStore, upd
     val role by game.role.collectAsState()
     val shop by game.shop.collectAsState()
     val summary by game.summary.collectAsState()
+    val runStats by game.runStats.collectAsState()
+    val saved by lobby.save.saved.collectAsState()
     val lobbyState by lobby.state.collectAsState()
     val held by game.held.collectAsState()
     val coop = role != Role.SOLO
@@ -102,6 +104,11 @@ fun TesselApp(game: GameSurfaceView, lobby: CoopLobby, store: SettingsStore, upd
         lobby.leave()
         game.leaveRun()
     }
+    // Leaving a run on purpose; for the host that also throws the save away.
+    val abandonCoop = {
+        lobby.leave(abandon = true)
+        game.leaveRun()
+    }
 
     Box(Modifier.fillMaxSize()) {
         if (mode == Mode.PLAYING) {
@@ -118,9 +125,12 @@ fun TesselApp(game: GameSurfaceView, lobby: CoopLobby, store: SettingsStore, upd
         Sheet(visible = mode == Mode.PAUSED && !settingsOpen && !waitingOnSomeone, onDismiss = game::resume) {
             PausePanel(
                 coop = coop,
+                host = role == Role.HOST,
+                stats = runStats,
                 onResume = game::resume,
                 onSettings = { settingsOpen = true },
-                onLeave = { if (coop) leaveCoop() else game.leaveRun() },
+                onSave = game::saveForLater,
+                onLeave = { if (coop) abandonCoop() else game.leaveRun() },
             )
         }
 
@@ -152,8 +162,10 @@ fun TesselApp(game: GameSurfaceView, lobby: CoopLobby, store: SettingsStore, upd
                 Text(detail, Type.subhead, c.ink2)
                 Spacer(Modifier.height(Space.x4))
                 Row(horizontalArrangement = Arrangement.spacedBy(Space.x3)) {
-                    SecondaryButton("Leave Game", leaveCoop, tint = c.danger)
+                    SecondaryButton("Leave Game", abandonCoop, tint = c.danger)
                     if (lost?.host == true) {
+                        // Saved with everyone in it, so the missing player has their seat next time.
+                        SecondaryButton("Multiplayer Pause", game::saveForLater)
                         PrimaryButton("Play On Without Them", {
                             lobby.continueWithout()
                             game.resume()
@@ -187,6 +199,7 @@ fun TesselApp(game: GameSurfaceView, lobby: CoopLobby, store: SettingsStore, upd
             LobbyScreen(
                 lobby = lobby,
                 state = lobbyState,
+                saved = saved,
                 settings = settings,
                 onDifficulty = { d -> store.update { it.copy(difficulty = d) } },
                 onBack = {
@@ -213,7 +226,7 @@ fun TesselApp(game: GameSurfaceView, lobby: CoopLobby, store: SettingsStore, upd
         // The partner left, or the link never came back, while the lobby screen was closed.
         val ended = lobbyState as? LobbyState.Ended
         if (ended != null && !lobbyOpen) {
-            NoticeCard("Game over", ended.message, "OK", lobby::dismiss)
+            NoticeCard(ended.title, ended.message, "OK", lobby::dismiss)
         }
     }
 
