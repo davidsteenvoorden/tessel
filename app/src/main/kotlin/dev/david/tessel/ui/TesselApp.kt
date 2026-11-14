@@ -21,6 +21,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -28,6 +29,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.layout.width
+import dev.david.tessel.core.dev.DevAccess
+import dev.david.tessel.core.dev.TapCounter
 import dev.david.tessel.platform.game.GameSurfaceView
 import dev.david.tessel.platform.game.Mode
 import dev.david.tessel.platform.game.Role
@@ -44,6 +48,9 @@ import dev.david.tessel.ui.components.PrimaryButton
 import dev.david.tessel.ui.components.SecondaryButton
 import dev.david.tessel.ui.components.Sheet
 import dev.david.tessel.ui.components.Text
+import dev.david.tessel.ui.screens.BreakPanel
+import dev.david.tessel.ui.screens.CodePanel
+import dev.david.tessel.ui.screens.DevScreen
 import dev.david.tessel.ui.screens.HomeScreen
 import dev.david.tessel.ui.screens.LobbyScreen
 import dev.david.tessel.ui.screens.NoticeCard
@@ -53,6 +60,8 @@ import dev.david.tessel.ui.screens.RunOverCard
 import dev.david.tessel.ui.screens.SettingsScreen
 import dev.david.tessel.ui.screens.ShopPanel
 import dev.david.tessel.ui.screens.StatsScreen
+import dev.david.tessel.ui.screens.TutorialCard
+import kotlinx.coroutines.delay
 import dev.david.tessel.ui.theme.Space
 import dev.david.tessel.ui.theme.Springs
 import dev.david.tessel.ui.theme.Theme
@@ -84,12 +93,30 @@ fun TesselApp(
     val saved by lobby.save.saved.collectAsState()
     val lobbyState by lobby.state.collectAsState()
     val held by game.held.collectAsState()
+    val breakDue by game.breakDue.collectAsState()
+    val tutorial by game.tutorial.collectAsState()
     val coop = role != Role.SOLO
 
     var settingsOpen by rememberSaveable { mutableStateOf(false) }
     var lobbyOpen by rememberSaveable { mutableStateOf(false) }
     var statsOpen by rememberSaveable { mutableStateOf(false) }
     var playOpen by remember { mutableStateOf(false) }
+    var devOpen by rememberSaveable { mutableStateOf(false) }
+    var codeOpen by remember { mutableStateOf(false) }
+    // Seven taps on the version line, then a second of quiet, ask for the developer code.
+    val taps = remember { TapCounter() }
+    var tapSeq by remember { mutableIntStateOf(0) }
+    LaunchedEffect(tapSeq) {
+        if (tapSeq == 0) return@LaunchedEffect
+        delay(DevAccess.QUIET_MS)
+        if (taps.settle()) codeOpen = true
+    }
+    val startTutorial = {
+        settingsOpen = false
+        devOpen = false
+        store.update { it.copy(tutorialSeen = true) }
+        game.startTutorial()
+    }
     // Kept after the game clears them, so a closing panel still has something to show.
     var lastShop by remember { mutableStateOf<ShopView?>(null) }
     var lastSummary by remember { mutableStateOf<RunSummary?>(null) }
@@ -120,6 +147,19 @@ fun TesselApp(
     }
 
     Box(Modifier.fillMaxSize()) {
+        val tutorialNow = tutorial
+        if (mode == Mode.PLAYING && tutorialNow != null) {
+            TutorialCard(
+                view = tutorialNow,
+                leftHanded = settings.leftHanded,
+                onSkip = game::leaveRun,
+                onFinish = game::leaveRun,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .windowInsetsPadding(WindowInsets.displayCutout)
+                    .padding(top = 8.dp),
+            )
+        }
         if (mode == Mode.PLAYING) {
             PauseButton(
                 onClick = game::pause,
@@ -131,7 +171,7 @@ fun TesselApp(
         }
 
         val waitingOnSomeone = lobbyState is LobbyState.Reconnecting || held
-        Sheet(visible = mode == Mode.PAUSED && !settingsOpen && !waitingOnSomeone, onDismiss = game::resume) {
+        Sheet(visible = mode == Mode.PAUSED && !breakDue && !settingsOpen && !waitingOnSomeone, onDismiss = game::resume) {
             PausePanel(
                 coop = coop,
                 host = role == Role.HOST,
@@ -139,7 +179,19 @@ fun TesselApp(
                 onResume = game::resume,
                 onSettings = { settingsOpen = true },
                 onSave = game::saveForLater,
-                onLeave = { if (coop) abandonCoop() else game.abandonRun() },
+                onLeave = { if (tutorial != null) game.leaveRun() else if (coop) abandonCoop() else game.abandonRun() },
+                practice = tutorial != null,
+            )
+        }
+
+        // A break reminder paused the game: save and stop, or carry on.
+        Sheet(visible = mode == Mode.PAUSED && breakDue && !settingsOpen && !waitingOnSomeone, onDismiss = game::resume) {
+            BreakPanel(
+                coop = coop,
+                minutes = settings.breakEvery,
+                stats = runStats,
+                onKeepPlaying = game::resume,
+                onSave = game::saveForLater,
             )
         }
 
@@ -251,6 +303,27 @@ fun TesselApp(
             )
         }
 
+        // A new install offers the tutorial once. Drawn after the home screen, or that would cover it.
+        Sheet(
+            visible = onStart == null && !settings.tutorialSeen && mode == Mode.HOME && !settingsOpen && !lobbyOpen && !statsOpen && !playOpen,
+            onDismiss = { store.update { it.copy(tutorialSeen = true) } },
+        ) {
+            Column(Modifier.width(420.dp).padding(start = Space.x6, end = Space.x6, top = Space.x3, bottom = Space.x5)) {
+                Text("New to Tessel?", Type.title2, c.ink)
+                Spacer(Modifier.height(Space.x1))
+                Text(
+                    "A short practice shows the controls and how to dodge enemy shots. You can skip it and find it again under How to Play in Settings.",
+                    Type.subhead,
+                    c.ink2,
+                )
+                Spacer(Modifier.height(Space.x4))
+                Row(horizontalArrangement = Arrangement.spacedBy(Space.x3)) {
+                    SecondaryButton("Skip", { store.update { it.copy(tutorialSeen = true) } }, Modifier.weight(1f))
+                    PrimaryButton("Start Tutorial", startTutorial, Modifier.weight(1f))
+                }
+            }
+        }
+
         AnimatedVisibility(
             visible = settingsOpen,
             enter = slideInHorizontally(Springs.ui()) { it } + fadeIn(Springs.ui()),
@@ -262,6 +335,43 @@ fun TesselApp(
                 inRun = mode != Mode.HOME,
                 onChange = store::update,
                 onBack = { settingsOpen = false },
+                onTutorial = startTutorial,
+                onDev = { devOpen = true },
+                onUnlockDev = {
+                    taps.tap()
+                    tapSeq++
+                },
+            )
+        }
+
+        AnimatedVisibility(
+            visible = settingsOpen && devOpen,
+            enter = slideInHorizontally(Springs.ui()) { it } + fadeIn(Springs.ui()),
+            exit = slideOutHorizontally(Springs.ui()) { it } + fadeOut(Springs.ui()),
+        ) {
+            DevScreen(
+                settings = settings,
+                version = updater.installed,
+                inRun = mode != Mode.HOME,
+                onChange = store::update,
+                onBreakNow = {
+                    devOpen = false
+                    settingsOpen = false
+                    game.breakNow()
+                },
+                onTutorial = startTutorial,
+                onBack = { devOpen = false },
+            )
+        }
+
+        Sheet(visible = codeOpen && settingsOpen, onDismiss = { codeOpen = false }) {
+            CodePanel(
+                onUnlock = {
+                    codeOpen = false
+                    store.update { it.copy(devUnlocked = true) }
+                    devOpen = true
+                },
+                onCancel = { codeOpen = false },
             )
         }
 
@@ -274,6 +384,8 @@ fun TesselApp(
 
     BackHandler(enabled = settingsOpen || lobbyOpen || statsOpen || playOpen || mode != Mode.HOME) {
         when {
+            codeOpen -> codeOpen = false
+            devOpen && settingsOpen -> devOpen = false
             settingsOpen -> settingsOpen = false
             statsOpen -> statsOpen = false
             playOpen -> playOpen = false

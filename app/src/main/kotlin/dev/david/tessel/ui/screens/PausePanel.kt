@@ -41,6 +41,7 @@ fun PausePanel(
     onSettings: () -> Unit,
     onSave: () -> Unit,
     onLeave: () -> Unit,
+    practice: Boolean = false,
 ) {
     val c = Theme.colors
     var asking by remember { mutableStateOf(Asking.NOTHING) }
@@ -51,6 +52,7 @@ fun PausePanel(
         Column(Modifier.width(320.dp)) {
             Text("Paused", Type.title2, c.ink)
             if (coop) Text("The game is paused on every phone.", Type.footnote, c.ink2)
+            if (practice) Text("Practice. Nothing here counts.", Type.footnote, c.ink2)
             Spacer(Modifier.height(Space.x4))
             when (asking) {
                 Asking.NOTHING -> {
@@ -59,9 +61,13 @@ fun PausePanel(
                         SecondaryButton("Settings", onSettings, Modifier.weight(1f))
                     }
                     Spacer(Modifier.height(Space.x3))
-                    SecondaryButton(if (coop) "Multiplayer Pause" else "Save and Quit", { asking = Asking.SAVE }, Modifier.fillMaxWidth())
-                    Spacer(Modifier.height(Space.x3))
-                    SecondaryButton(if (coop) "Leave Game" else "Leave Run", { asking = Asking.LEAVE }, Modifier.fillMaxWidth(), tint = c.danger)
+                    if (practice) {
+                        SecondaryButton("Leave Tutorial", onLeave, Modifier.fillMaxWidth())
+                    } else {
+                        SecondaryButton(if (coop) "Multiplayer Pause" else "Save and Quit", { asking = Asking.SAVE }, Modifier.fillMaxWidth())
+                        Spacer(Modifier.height(Space.x3))
+                        SecondaryButton(if (coop) "Leave Game" else "Leave Run", { asking = Asking.LEAVE }, Modifier.fillMaxWidth(), tint = c.danger)
+                    }
                 }
                 Asking.SAVE -> Confirm(
                     question = if (coop) "Save and stop for everyone?" else "Save this run and quit?",
@@ -89,7 +95,7 @@ fun PausePanel(
                 )
             }
         }
-        if (stats != null) RunStats(stats, Modifier.weight(1f).padding(top = Space.x1))
+        if (stats != null && !practice) RunStats(stats, Modifier.weight(1f).padding(top = Space.x1))
     }
 }
 

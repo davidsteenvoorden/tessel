@@ -18,6 +18,9 @@ class Snapshot {
 
     /** The host is holding the game while a phone tries to reconnect. */
     var waiting = false
+
+    /** The pause is a break reminder, from this phone or another. */
+    var breaking = false
     var difficulty = Difficulty.NORMAL
     var playerCount = 2
 

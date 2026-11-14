@@ -30,6 +30,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import dev.david.tessel.core.content.Difficulty
+import dev.david.tessel.platform.store.BREAK_CHOICES
 import dev.david.tessel.platform.store.Settings
 import dev.david.tessel.platform.store.StickSize
 import dev.david.tessel.platform.update.UpdateState
@@ -37,6 +38,7 @@ import dev.david.tessel.platform.update.Updater
 import dev.david.tessel.ui.components.BackButton
 import dev.david.tessel.ui.components.Divider
 import dev.david.tessel.ui.components.Group
+import dev.david.tessel.ui.components.NavRow
 import dev.david.tessel.ui.components.Segmented
 import dev.david.tessel.ui.components.Text
 import dev.david.tessel.ui.components.ToggleRow
@@ -52,6 +54,9 @@ fun SettingsScreen(
     inRun: Boolean,
     onChange: ((Settings) -> Settings) -> Unit,
     onBack: () -> Unit,
+    onTutorial: () -> Unit = {},
+    onDev: () -> Unit = {},
+    onUnlockDev: () -> Unit = {},
 ) {
     val c = Theme.colors
     Column(
@@ -138,7 +143,37 @@ fun SettingsScreen(
                     )
                 }
 
-                Updates(updater)
+                Group(
+                    "Break Reminders",
+                    footer = if (settings.breakEvery == 0) {
+                        "A card pauses the game now and then and suggests a break. In a team it pauses everyone."
+                    } else {
+                        "After ${settings.breakEvery} minutes of play a card pauses the game. You can save and stop, or keep going. In a team it pauses everyone."
+                    },
+                ) {
+                    Box(Modifier.padding(Space.x3)) {
+                        Segmented(
+                            options = BREAK_CHOICES.map { if (it == 0) "Off" else "$it min" },
+                            selected = BREAK_CHOICES.indexOf(settings.breakEvery).coerceAtLeast(0),
+                            onSelect = { i -> onChange { it.copy(breakEvery = BREAK_CHOICES[i]) } },
+                        )
+                    }
+                }
+
+                Group("Help") {
+                    ActionRow(
+                        "How to Play",
+                        if (inRun) "Not during a run" else null,
+                        if (inRun) null else onTutorial,
+                    )
+                }
+
+                Updates(updater, onVersionTap = if (settings.devUnlocked) null else onUnlockDev)
+                if (settings.devUnlocked) {
+                    Group("Developer", footer = "Solo runs only. Switched on by tapping the version line.") {
+                        NavRow("Developer Options", onDev)
+                    }
+                }
                 Spacer(Modifier.height(Space.x4))
             }
         }
@@ -147,7 +182,7 @@ fun SettingsScreen(
 
 /** The installed version and a way to get the newest one from GitHub. */
 @Composable
-private fun Updates(updater: Updater) {
+private fun Updates(updater: Updater, onVersionTap: (() -> Unit)?) {
     val c = Theme.colors
     val state by updater.state.collectAsState()
     val footer = when (val st = state) {
@@ -161,7 +196,7 @@ private fun Updates(updater: Updater) {
         }
     }
     Group("Updates", footer = footer) {
-        InfoRow("Version", updater.installed)
+        InfoRow("Version", updater.installed, onVersionTap)
         Divider()
         when (val st = state) {
             UpdateState.Idle, is UpdateState.Failed -> ActionRow("Check for Updates", null, updater::check)
@@ -185,10 +220,14 @@ private fun Updates(updater: Updater) {
 }
 
 @Composable
-private fun InfoRow(title: String, value: String) {
+private fun InfoRow(title: String, value: String, onTap: (() -> Unit)? = null) {
     val c = Theme.colors
     Row(
-        Modifier.fillMaxWidth().heightIn(min = 52.dp).padding(horizontal = Space.x4),
+        Modifier
+            .fillMaxWidth()
+            .heightIn(min = 52.dp)
+            .then(if (onTap == null) Modifier else Modifier.clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { onTap() })
+            .padding(horizontal = Space.x4),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(title, Type.body, c.ink, Modifier.weight(1f))

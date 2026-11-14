@@ -38,13 +38,16 @@ import dev.david.tessel.core.sim.TICK_HZ
 import dev.david.tessel.core.sim.World
 import dev.david.tessel.core.stats.RunEntry
 import dev.david.tessel.core.stats.Tally
+import dev.david.tessel.core.tutorial.Tutorial
 import dev.david.tessel.design.Palette
 import dev.david.tessel.platform.audio.Haptics
+import dev.david.tessel.platform.dev.Trace
 import dev.david.tessel.platform.input.Gamepad
 import dev.david.tessel.platform.input.StickView
 import dev.david.tessel.platform.input.TwinStickController
 import dev.david.tessel.platform.net.HostLink
 import dev.david.tessel.platform.net.Link
+import dev.david.tessel.platform.store.Dev
 import dev.david.tessel.platform.store.LedgerStore
 import dev.david.tessel.platform.store.Settings
 import dev.david.tessel.platform.store.SoloSaves
@@ -139,6 +142,14 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
     private val heldFlow = MutableStateFlow(false)
     val held: StateFlow<Boolean> = heldFlow
 
+    /** A break reminder is the reason for the pause: the card asks to keep playing or to save. */
+    private val breakFlow = MutableStateFlow(false)
+    val breakDue: StateFlow<Boolean> = breakFlow
+
+    /** The guided practice, while one is on. */
+    private val tutorialFlow = MutableStateFlow<TutorialView?>(null)
+    val tutorial: StateFlow<TutorialView?> = tutorialFlow
+
     private val thread = HandlerThread("game").apply { start() }
     private val handler = Handler(thread.looper)
     private lateinit var choreographer: Choreographer
@@ -157,6 +168,20 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
     private var loopback: LoopbackHost? = null
     private var me = HOST_PLAYER
     private var checkpoint: Checkpoint? = null
+
+    // Break reminders: minutes between them (0 for off), and how long this phone has played since the last one.
+    @Volatile private var breakEvery = 0
+    private var playedNanos = 0L
+    private var lastPlayAt = 0L
+    private var breaking = false
+
+    private var practice: Tutorial? = null
+    private var tutorialKey = -1
+
+    // Developer options for solo runs, and whether this run used any, which keeps it out of the records.
+    @Volatile private var dev = Dev()
+    private var cheating = false
+    private var gameSpeed = 1f
 
     // Solo: the slot this run keeps itself in (-1 for none), and what this phone has met and beaten since the last flush.
     private var soloSlot = -1
@@ -194,13 +219,99 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
 
     /** A new solo run in a free slot. With every slot taken it does not start; the menus ask for one to be freed first. */
     private fun beginSolo(difficulty: Difficulty) {
-        val slot = saves?.free() ?: 0
-        if (slot < 0) return
+        // A run that uses developer options goes into no save slot and no record.
+        val cheat = dev.active
+        val slot = if (cheat) -1 else saves?.free() ?: 0
+        if (!cheat && slot < 0) return
         dropCoop()
-        world.reset(players = 1, seed = SystemClock.elapsedRealtimeNanos(), difficulty = difficulty)
+        world.reset(players = 1, seed = SystemClock.elapsedRealtimeNanos(), difficulty = dev.difficulty ?: difficulty)
+        if (cheat) {
+            if (dev.startStage > 1) world.skipTo(dev.startStage)
+            world.players.coins[0] = dev.startCoins
+        }
         soloSlot = slot
+        markCheating(cheat)
         freshRun()
-        keep()
+        if (!cheat) keep()
+    }
+
+    private fun markCheating(on: Boolean) {
+        cheating = on
+        hud.tag = if (on) "Developer run, not counted" else null
+    }
+
+    /** Practice for a new player: walking, then shooting, then dodging. Counts for nothing. */
+    fun startTutorial() = onGameThread {
+        dropCoop()
+        world.reset(players = 1, seed = SystemClock.elapsedRealtimeNanos(), difficulty = Difficulty.EASY)
+        world.practice = true
+        world.spawning = false
+        practice = Tutorial().also { it.begin(world) }
+        hud.practice = true
+        soloSlot = -1
+        markCheating(false)
+        freshRun()
+        recorded = true
+        tutorialKey = -1
+        publishTutorial()
+        Trace.log("tutorial started")
+    }
+
+    private fun publishTutorial() {
+        val t = practice ?: return
+        val q = (t.progress * 20f).toInt()
+        val key = (t.step.ordinal * 100 + q) * 4 + (if (t.hit) 2 else 0) + (if (t.passed) 1 else 0)
+        if (key == tutorialKey) return
+        tutorialKey = key
+        tutorialFlow.value = TutorialView(t.step, q, t.hit, t.passed)
+    }
+
+    /** Developer page: the break reminder, now. */
+    fun breakNow() = onGameThread {
+        // From the developer page the run is paused already; the card replaces the pause menu.
+        if (current == Mode.PLAYING || (current == Mode.PAUSED && playingAs != Role.CLIENT)) callBreak()
+    }
+
+    private fun callBreak() {
+        playedNanos = 0L
+        Trace.log("break reminder, role=$playingAs")
+        if (playingAs == Role.CLIENT) {
+            // The host pauses everyone, this phone too, and says why.
+            client?.action(Wire.BREAK)
+        } else {
+            breaking = true
+            enter(Mode.PAUSED)
+        }
+    }
+
+    /** Counts the time spent playing. Time in the shop counts; five minutes away from the game counts as a break. */
+    private fun trackUsage(usable: Long) {
+        if (practice != null) return
+        if (current != Mode.PLAYING && current != Mode.SHOP) return
+        val t = SystemClock.elapsedRealtime()
+        if (t - lastPlayAt > BREAK_RESET_MS) playedNanos = 0L
+        lastPlayAt = t
+        playedNanos += usable
+        val every = breakEvery
+        if (current == Mode.PLAYING && every > 0 && playedNanos >= every * 60_000_000_000L) callBreak()
+    }
+
+    /**
+     * Puts the developer options on the world. A team never gets any: the
+     * options only reach a solo run, and a run they touched is marked.
+     */
+    private fun applyDev(live: Boolean = false) {
+        val solo = playingAs == Role.SOLO && practice == null
+        val d = if (solo) dev else Dev()
+        world.invincible = d.invincible
+        if (practice == null) world.spawning = !d.noSpawns
+        gameSpeed = d.speed
+        if (!solo) return
+        val changesTheRun = d.invincible || d.noSpawns || d.speed != 1f || d.difficulty != null
+        if (live && current != Mode.HOME) {
+            d.difficulty?.let { world.difficulty = it }
+            if (changesTheRun && !cheating) markCheating(true)
+        }
     }
 
     /** Carries on the solo run kept in [slot]: in the shop it stopped at, or from the start. */
@@ -209,6 +320,8 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
         dropCoop()
         world.restore(saved.checkpoint, SystemClock.elapsedRealtimeNanos()) { it == HOST_PLAYER }
         soloSlot = slot
+        markCheating(dev.invincible || dev.noSpawns || dev.speed != 1f || dev.difficulty != null)
+        applyDev()
         freshRun()
         if (world.phase == Phase.SHOP) {
             publishShop()
@@ -333,7 +446,7 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
 
     /** Solo: leaves the run on purpose. It goes in the history as left, and its save is thrown away. */
     fun abandonRun() = onGameThread {
-        if (playingAs == Role.SOLO && !recorded) {
+        if (playingAs == Role.SOLO && !recorded && !cheating && practice == null) {
             val run = summarize()
             if (run != null && run.seconds >= MIN_RECORDED_SECONDS) {
                 recorded = true
@@ -437,6 +550,9 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
             renderer.stickRadius = controller.stickRadius
             renderer.showStats = s.showStats
             hud.showLink = s.showLink
+            breakEvery = s.breakEvery
+            dev = s.dev
+            applyDev(live = true)
         }
     }
 
@@ -500,6 +616,7 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
         lastFrameNanos = frameTimeNanos
         // After a stall, catching up on every missed step would only stall again.
         val usable = elapsed.coerceAtMost(MAX_CATCH_UP_NANOS)
+        trackUsage(usable)
 
         controller.read(inputs[0], moveView, aimView, now)
         gamepad.apply(inputs[0])
@@ -528,12 +645,14 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
             val h = host
             if (current == Mode.PLAYING) {
                 stress?.apply(world, inputs[0])
-                pendingNanos += usable
+                pendingNanos += if (gameSpeed == 1f) usable else (usable * gameSpeed).toLong()
                 while (pendingNanos >= STEP_NANOS) {
                     if (h != null) for (p in 1 until world.playerCount) inputs[p].copyFrom(h.remoteInput(p, nowNanos))
                     world.step(inputs)
+                    practice?.update(world, inputs[0])
                     pendingNanos -= STEP_NANOS
                 }
+                if (practice != null) publishTutorial()
             }
             if (h != null) {
                 if (current == Mode.SHOP && h.allReady()) {
@@ -549,13 +668,13 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
                 h.collect(world.events)
             }
             react(world.events, now)
-            h?.pump(nowNanos, current == Mode.PAUSED, unreachable != 0)
+            h?.pump(nowNanos, current == Mode.PAUSED, unreachable != 0, breaking)
             if (h == null) hud.link(-1, -1) else showWorstLink(h)
             hud.score(world.score(me))
             shown = world
         }
         // A few times a second is plenty to notice what has come into the arena.
-        if (current == Mode.PLAYING && ++scanFrames % SCAN_EVERY_FRAMES == 0) {
+        if (current == Mode.PLAYING && practice == null && !cheating && ++scanFrames % SCAN_EVERY_FRAMES == 0) {
             val en = shown.enemies
             for (i in 0 until en.count) tally.see(en.type[i], shown.stage)
         }
@@ -617,12 +736,13 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
     }
 
     private fun flushLog() {
-        ledger?.merge(tally)
+        // Practice and developer runs leave no trace in the logbook.
+        if (practice != null || cheating) tally.clear() else ledger?.merge(tally)
     }
 
     /** Writes a finished run into the ledger once, and hands the end screen its summary. */
     private fun finishRun(run: RunSummary) {
-        if (recorded) {
+        if (recorded || cheating) {
             summaryFlow.value = run
             return
         }
@@ -805,6 +925,7 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
     /** On the joining phone the menus follow the host: its pause, its shop, its end of run. */
     private fun followHost(c: ClientSession) {
         val s = c.latest ?: return
+        breakFlow.value = s.paused && s.breaking
         val wanted = when {
             s.paused -> Mode.PAUSED
             s.phase == Phase.SHOP -> Mode.SHOP
@@ -854,6 +975,11 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
     private fun onPartnerAsk(kind: Int) {
         when (kind) {
             Wire.PAUSE -> if (current == Mode.PLAYING) enter(Mode.PAUSED)
+            Wire.BREAK -> if (current == Mode.PLAYING) {
+                Trace.log("break reminder from a joined phone")
+                breaking = true
+                enter(Mode.PAUSED)
+            }
             Wire.SAVE -> saveAndStop()
             Wire.RESUME -> if (current == Mode.PAUSED && unreachable == 0) {
                 restartClock()
@@ -888,6 +1014,7 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
     private fun becomeRole(role: Role) {
         playingAs = role
         roleFlow.value = role
+        applyDev()
     }
 
     private fun dropCoop() {
@@ -898,6 +1025,14 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
         unreachable = 0
         me = HOST_PLAYER
         heldFlow.value = false
+        if (practice != null) {
+            practice = null
+            tutorialFlow.value = null
+            hud.practice = false
+            world.practice = false
+            world.spawning = true
+        }
+        markCheating(false)
         becomeRole(Role.SOLO)
     }
 
@@ -999,7 +1134,11 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
         if (mode == Mode.PAUSED) statsFlow.value = summarize()
         // Anything but playing is a safe moment to put what was met and beaten on record.
         if (mode != Mode.PLAYING) flushLog()
+        if (mode != Mode.PAUSED) breaking = false
+        if (mode != current) Trace.log("mode $current to $mode, role=$playingAs")
         current = mode
+        // Before the mode, so a menu that sees the pause also sees why.
+        if (playingAs != Role.CLIENT || mode != Mode.PAUSED) breakFlow.value = breaking && mode == Mode.PAUSED
         modeFlow.value = mode
     }
 
@@ -1046,5 +1185,8 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
         /** A run left this soon after it began is not worth a line in the history. */
         const val MIN_RECORDED_SECONDS = 20
         const val SCAN_EVERY_FRAMES = 15
+
+        /** Time away from play, in milliseconds, that counts as a break for the reminder. */
+        const val BREAK_RESET_MS = 5 * 60 * 1000L
     }
 }

@@ -13,6 +13,7 @@ import androidx.core.view.WindowInsetsControllerCompat
 import dev.david.tessel.core.sim.Bot
 import dev.david.tessel.platform.game.GameSurfaceView
 import dev.david.tessel.platform.game.Mode
+import dev.david.tessel.platform.dev.LogExport
 import dev.david.tessel.platform.game.StressRig
 import dev.david.tessel.platform.net.CoopLobby
 import dev.david.tessel.platform.store.LedgerStore
@@ -30,6 +31,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
+        LogExport.installCrashNote(this)
         val store = SettingsStore(this)
         val ledger = LedgerStore(java.io.File(filesDir, "ledger.dat"))
         val saves = SoloSaves(filesDir)

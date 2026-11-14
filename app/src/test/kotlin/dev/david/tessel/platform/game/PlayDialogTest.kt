@@ -49,6 +49,7 @@ class PlayDialogTest {
         game.ledger = ledger
         val lobby = CoopLobby(compose.activity, game)
         val store = SettingsStore(compose.activity)
+        store.update { it.copy(tutorialSeen = true) }
         val updater = Updater(compose.activity)
         compose.setContent { TesselTheme { TesselApp(game, lobby, store, ledger, saves, updater, null) } }
     }

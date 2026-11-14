@@ -3,9 +3,18 @@ package dev.david.tessel.platform.game
 import dev.david.tessel.core.content.Difficulty
 import dev.david.tessel.core.content.Scoring
 import dev.david.tessel.core.sim.Cause
+import dev.david.tessel.core.tutorial.TutorialStep
 
 /** What the screen is doing, as the menus see it. */
 enum class Mode { HOME, PLAYING, PAUSED, SHOP, OVER }
+
+/** Where the tutorial is, for the card over the arena. [progress] is in twentieths. */
+data class TutorialView(
+    val step: TutorialStep,
+    val progress: Int,
+    val hit: Boolean,
+    val passed: Boolean,
+)
 
 /** One shop slot, copied out of the sim for the menu to draw. */
 class ShopOffer(

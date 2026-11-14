@@ -56,6 +56,7 @@ object Protocol {
         gone: Events,
         forPlayer: Int,
         echo: Echo,
+        breaking: Boolean = false,
     ) {
         Wire.begin(buf, Wire.SNAPSHOT)
         buf.putInt(echo.seq)
@@ -66,7 +67,7 @@ object Protocol {
         buf.put(w.stage.coerceAtMost(255).toByte())
         buf.put(w.phase.ordinal.toByte())
         buf.putInt(w.stageTicks)
-        buf.put(((if (paused) 1 else 0) or (if (waiting) 2 else 0)).toByte())
+        buf.put(((if (paused) 1 else 0) or (if (waiting) 2 else 0) or (if (breaking) 4 else 0)).toByte())
         buf.put(w.difficulty.ordinal.toByte())
         buf.put(w.playerCount.toByte())
         buf.put(ready.toByte())
@@ -195,6 +196,7 @@ object Protocol {
         val flags = buf.get().toInt()
         s.paused = flags and 1 != 0
         s.waiting = flags and 2 != 0
+        s.breaking = flags and 4 != 0
         s.difficulty = Difficulty.entries[buf.get().toInt()]
         s.playerCount = buf.get().toInt().coerceIn(1, MAX_PLAYERS)
         s.ready = buf.get().toInt() and 0xFF

@@ -164,7 +164,7 @@ class HostSession(private val world: World, private val send: (player: Int, byte
     }
 
     /** Sends each linked phone a snapshot if one is due. Keeps sending while paused or shopping so menus stay current. */
-    fun pump(nowNanos: Long, paused: Boolean, waiting: Boolean) {
+    fun pump(nowNanos: Long, paused: Boolean, waiting: Boolean, breaking: Boolean = false) {
         for (p in 1 until world.playerCount) {
             if (linked and (1 shl p) == 0) continue
             // Due on an even beat, give or take a few milliseconds, so frame timing never turns two frames into three.
@@ -174,7 +174,7 @@ class HostSession(private val world: World, private val send: (player: Int, byte
             echoOut.stamp = now
             echoOut.echo = lastStamp[p]
             echoOut.held = if (lastStamp[p] == 0) 0 else now - stampAt[p]
-            Protocol.writeSnapshot(buf, world, paused, waiting, ready, outbox[p], born[p], gone[p], p, echoOut)
+            Protocol.writeSnapshot(buf, world, paused, waiting, ready, outbox[p], born[p], gone[p], p, echoOut, breaking)
             if (send(p, Wire.finish(buf), true)) {
                 outbox[p].clear()
                 born[p].clear()

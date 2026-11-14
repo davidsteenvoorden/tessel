@@ -43,15 +43,19 @@ class Hud(private val density: Float, fontScale: Float) {
     }
     private val clockText = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         typeface = semibold()
-        textSize = 14f * sp
-        textAlign = Paint.Align.CENTER
+        textSize = 15f * sp
         fontFeatureSettings = "tnum"
     }
     private val scoreText = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        textSize = 13f * sp
-        textAlign = Paint.Align.CENTER
+        textSize = 15f * sp
         fontFeatureSettings = "tnum"
     }
+
+    /** The tutorial draws health only: no stage, clock, score or link. */
+    var practice = false
+
+    /** A small note under the stage bar, for runs that are not counted. Null for none. */
+    var tag: String? = null
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG)
 
     /** The player's score for the readout under the clock. Set each frame by whoever knows it. */
@@ -120,8 +124,9 @@ class Hud(private val density: Float, fontScale: Float) {
             rowTop += 14f * density
         }
 
+        if (practice) return
         drawStageBar(canvas, w, palette, insetTop, me)
-        drawClock(canvas, w, palette, insetTop)
+        drawClock(canvas, w, palette, insetTop, insetRight)
         drawAnnouncement(canvas, palette, now)
         drawLink(canvas, palette, insetTop, insetRight)
     }
@@ -154,7 +159,8 @@ class Hud(private val density: Float, fontScale: Float) {
         val labelWidth = linkText.measureText(label)
         // Clear of the pause button: its 48 dp target plus the 10 dp margin it sits in.
         val right = canvas.width - insetRight - 68f * density
-        val baseline = insetTop + 31f * density
+        // One line under the clock and score.
+        val baseline = insetTop + 50f * density
         linkText.color = tint
         canvas.drawText(buf.chars, 0, buf.length, right - numberWidth, baseline, linkText)
         linkText.color = palette.ink2
@@ -223,16 +229,25 @@ class Hud(private val density: Float, fontScale: Float) {
         }
     }
 
-    /** How long the run has lasted, with the score under it, below the stage bar. */
-    private fun drawClock(canvas: Canvas, w: World, palette: Palette, insetTop: Int) {
-        val cx = canvas.width / 2f
-        val clockBase = insetTop + CLOCK_TOP_DP * density
-        clockText.color = palette.ink2
-        buf.clear().putClock(w.tick / TICK_HZ)
-        canvas.drawText(buf.chars, 0, buf.length, cx, clockBase, clockText)
+    /** How long the run has lasted and the score, in one line beside the pause button, to its left. */
+    private fun drawClock(canvas: Canvas, w: World, palette: Palette, insetTop: Int, insetRight: Int) {
+        // Clear of the pause button: its 48 dp target plus the 10 dp margin it sits in.
+        val right = canvas.width - insetRight - 68f * density
+        val baseline = insetTop + 31f * density
+        scoreText.color = palette.ink2
+        buf.clear().putGrouped(score)
+        val scoreWidth = scoreText.measureText(buf.chars, 0, buf.length)
+        canvas.drawText(buf.chars, 0, buf.length, right - scoreWidth, baseline, scoreText)
+        val label = "Score"
+        val labelWidth = scoreText.measureText(label)
         scoreText.color = palette.ink3
-        buf.clear().put("Score ").putGrouped(score)
-        canvas.drawText(buf.chars, 0, buf.length, cx, clockBase + 17f * sp, scoreText)
+        val labelLeft = right - scoreWidth - 5f * density - labelWidth
+        canvas.drawText(label, labelLeft, baseline, scoreText)
+
+        clockText.color = palette.ink
+        buf.clear().putClock(w.tick / TICK_HZ)
+        val clockWidth = clockText.measureText(buf.chars, 0, buf.length)
+        canvas.drawText(buf.chars, 0, buf.length, labelLeft - 16f * density - clockWidth, baseline, clockText)
     }
 
     /**
@@ -284,9 +299,12 @@ class Hud(private val density: Float, fontScale: Float) {
             }
             if (message != null) {
                 note.color = palette.danger
-                // Under the clock and the score.
-                canvas.drawText(message, cx, insetTop + (CLOCK_TOP_DP + 40f) * density, note)
+                canvas.drawText(message, cx, insetTop + 62f * density, note)
             }
+        }
+        tag?.let {
+            note.color = palette.ink3
+            canvas.drawText(it, cx, insetTop + 62f * density, note)
         }
     }
 
@@ -296,8 +314,7 @@ class Hud(private val density: Float, fontScale: Float) {
     private companion object {
         const val BAR_WIDTH_DP = 168f
 
-        /** Where the clock sits, measured from the top of the screen's safe area. */
-        const val CLOCK_TOP_DP = 58f
+
         const val TRACK_ALPHA = 90
         const val ANNOUNCE_MS = 3200L
 

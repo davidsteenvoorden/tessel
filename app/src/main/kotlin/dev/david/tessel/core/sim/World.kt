@@ -92,12 +92,18 @@ class World(seed: Long = 1L) {
     /** Off in tests that want an empty arena. */
     var spawning = true
 
+    /** The tutorial's arena: nothing hurts the player and the stage never ends. */
+    var practice = false
+
+    /** Developer option: hits are felt and shown, but cost no health. */
+    var invincible = false
+
     var tick = 0
         private set
     var playerCount = 1
         private set
     var difficulty = Difficulty.NORMAL
-        private set
+        internal set
     var phase = Phase.FIGHT
         private set
     var stage = 1
@@ -139,6 +145,7 @@ class World(seed: Long = 1L) {
 
     fun reset(players: Int = 1, seed: Long = rng.nextLong(), difficulty: Difficulty = this.difficulty) {
         rng.seed(seed)
+        practice = false
         this.difficulty = difficulty
         tick = 0
         phase = Phase.FIGHT
@@ -167,7 +174,7 @@ class World(seed: Long = 1L) {
         tick++
         if (phase == Phase.FIGHT) {
             stageTicks++
-            if (stageTicks >= STAGE_TICKS && !isBossStage()) endFight()
+            if (stageTicks >= STAGE_TICKS && !isBossStage() && !practice) endFight()
         } else {
             clearTicks++
         }
@@ -800,7 +807,7 @@ class World(seed: Long = 1L) {
         val pl = players
         val px = pl.x[p]
         val py = pl.y[p]
-        pl.hp[p] -= 1
+        if (!practice && !invincible) pl.hp[p] -= 1
         pl.taken[p]++
         pl.invuln[p] = INVULN_TICKS
         pl.hurt[p] = HURT_TICKS

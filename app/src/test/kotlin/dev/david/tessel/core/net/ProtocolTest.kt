@@ -38,6 +38,20 @@ class ProtocolTest {
     }
 
     @Test
+    fun aBreakReminderPauseTravelsWithTheSnapshot() {
+        val w = busyWorld()
+        for (breaking in listOf(true, false)) {
+            val buf = Wire.buffer(MAX_MESSAGE * 2)
+            Protocol.writeSnapshot(buf, w, true, false, 0, Events(), Events(), Events(), CLIENT, Echo(), breaking)
+            val s = Snapshot()
+            Protocol.readSnapshot(Wire.open(Wire.finish(buf)), s)
+            assertTrue(s.paused)
+            assertEquals(breaking, s.breaking)
+            assertFalse(s.waiting)
+        }
+    }
+
+    @Test
     fun theWorldSurvivesTheTripWithinQuantization() {
         val w = busyWorld()
         val s = roundTrip(w, paused = true, ready = 2)
