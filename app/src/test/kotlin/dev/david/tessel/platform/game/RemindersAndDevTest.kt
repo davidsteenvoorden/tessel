@@ -4,6 +4,7 @@ import androidx.activity.ComponentActivity
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onLast
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
@@ -257,5 +258,15 @@ class RemindersAndDevTest {
             while (saves.saves.value.size < n + 1 && System.currentTimeMillis() < until) Thread.sleep(10)
             assertEquals(n + 1, saves.saves.value.size)
         }
+    }
+
+    @Test
+    fun withDeveloperOptionsOnTheLogoOpensThem() {
+        launch(seen = true)
+        store.update { it.copy(devUnlocked = true) }
+        settle(1000)
+        compose.onNodeWithContentDescription("Tessel logo").performClick()
+        settle()
+        compose.onNodeWithText("Try a Run With These").performScrollTo().assertExists()
     }
 }

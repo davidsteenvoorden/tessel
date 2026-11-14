@@ -1,6 +1,8 @@
 package dev.david.tessel.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -14,6 +16,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -41,6 +46,7 @@ fun HomeScreen(
     onStats: () -> Unit,
     onDifficulty: (Difficulty) -> Unit,
     onSettings: () -> Unit,
+    onLogo: (() -> Unit)? = null,
 ) {
     val c = Theme.colors
     Row(
@@ -52,7 +58,13 @@ fun HomeScreen(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
-            ShardMark(Modifier.size(64.dp))
+            // With developer options on, the logo is a shortcut to them.
+            ShardMark(
+                Modifier
+                    .size(64.dp)
+                    .semantics { contentDescription = "Tessel logo" }
+                    .then(if (onLogo == null) Modifier else Modifier.clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { onLogo() }),
+            )
             Spacer(Modifier.height(Space.x5))
             Text("Tessel", Type.display, c.ink)
             Spacer(Modifier.height(Space.x2))

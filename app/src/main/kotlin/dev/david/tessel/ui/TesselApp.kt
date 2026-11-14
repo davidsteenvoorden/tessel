@@ -255,6 +255,12 @@ fun TesselApp(
                 onStats = { statsOpen = true },
                 onDifficulty = { d -> store.update { it.copy(difficulty = d) } },
                 onSettings = { settingsOpen = true },
+                onLogo = if (settings.devUnlocked) {
+                    {
+                        settingsOpen = true
+                        devOpen = true
+                    }
+                } else null,
             )
         }
 
