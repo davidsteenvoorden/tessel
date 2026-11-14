@@ -1,6 +1,7 @@
 package dev.david.tessel.core.sim
 
 import dev.david.tessel.core.content.Difficulty
+import dev.david.tessel.core.content.Perks
 import dev.david.tessel.core.content.Scoring
 import dev.david.tessel.core.content.Upgrades
 import java.nio.BufferUnderflowException
@@ -39,6 +40,8 @@ class Checkpoint(
     val stock = Array(MAX_PLAYERS) { IntArray(SHOP_SLOTS) { -1 } }
     val rerolls = IntArray(MAX_PLAYERS)
     val heals = IntArray(MAX_PLAYERS)
+    val perks = IntArray(MAX_PLAYERS)
+    val perkOffer = Array(MAX_PLAYERS) { IntArray(Perks.OFFERED) { -1 } }
 
     /** Seconds of play so far. */
     val seconds: Int get() = tick / TICK_HZ
@@ -56,7 +59,7 @@ class Checkpoint(
     val names = Array(MAX_PLAYERS) { "" }
 
     fun write(): ByteArray {
-        val buf = ByteBuffer.allocate(64 + players * (124 + Upgrades.count + SHOP_SLOTS)).order(ByteOrder.LITTLE_ENDIAN)
+        val buf = ByteBuffer.allocate(64 + players * (132 + Upgrades.count + SHOP_SLOTS)).order(ByteOrder.LITTLE_ENDIAN)
         buf.put('T'.code.toByte())
         buf.put('C'.code.toByte())
         buf.put(FORMAT.toByte())
@@ -89,6 +92,8 @@ class Checkpoint(
             for (slot in 0 until SHOP_SLOTS) buf.put(stock[p][slot].toByte())
             buf.put(rerolls[p].toByte())
             buf.put(heals[p].toByte())
+            buf.putInt(perks[p])
+            for (k in 0 until Perks.OFFERED) buf.put(perkOffer[p][k].toByte())
         }
         val out = ByteArray(buf.position())
         buf.flip()
@@ -98,7 +103,7 @@ class Checkpoint(
 
     companion object {
         /** Bump when the layout changes. Saves from a version before [OLDEST] are dropped rather than misread. */
-        const val FORMAT = 2
+        const val FORMAT = 3
         private const val OLDEST = 1
 
         /** Null when [bytes] are not a save this version can read. */
@@ -143,10 +148,17 @@ class Checkpoint(
                     }
                     for (slot in 0 until slots) {
                         val item = buf.get().toInt()
-                        if (slot < SHOP_SLOTS) cp.stock[p][slot] = if (item < Upgrades.count) item else -1
+                        if (slot < SHOP_SLOTS) cp.stock[p][slot] = if (item >= 0 && (item and RARE_BIT.inv()) < Upgrades.count) item else -1
                     }
                     cp.rerolls[p] = buf.get().toInt()
                     cp.heals[p] = buf.get().toInt()
+                    if (format >= 3) {
+                        cp.perks[p] = buf.int
+                        for (k in 0 until Perks.OFFERED) {
+                            val id = buf.get().toInt()
+                            cp.perkOffer[p][k] = if (id in 0 until Perks.count) id else -1
+                        }
+                    }
                 }
                 cp
             } catch (_: BufferUnderflowException) {

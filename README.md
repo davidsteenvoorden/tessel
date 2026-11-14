@@ -10,6 +10,8 @@ Each stage lasts a minute. When it ends you get a few seconds to clear what is l
 
 New kinds of enemy keep turning up as the stages go by: ones that keep their distance and shoot, ones that aim a line and charge down it, ones that split in two or in four, turrets that park and spin. Each kind has its own colour and shape. Enemy shots are always hollow orange rings, and anything that is about to fire or charge warns you first.
 
+From stage 6 some enemies are elites, wearing a gold ring: armored ones take half damage, fast ones run at you, splitting ones leave Pips behind and bursting ones fire a ring when they break. They have more health and pay more coins and score, and now and then one drops a surge, a few seconds of faster and harder shots. After each boss you choose one of three perks, such as Second Wind, Siphon or Shockwave, which last the rest of the run. From stage 4 the shop sometimes sells a rare upgrade: three levels in one buy at a higher price.
+
 Stage 5 brings the first boss, and another follows every five stages. There are eight, each with its own way of attacking, and after the eighth the line starts over with tougher versions.
 
 Pausing shows the run so far beside the menu: kills, damage, shots, coins, hits taken and upgrades. In a team it is a table with a column per player, and whoever leads a row that is worth winning stands out. The same numbers come up when the run ends.
@@ -75,8 +77,10 @@ You need a JDK (17 or newer) and the Android SDK with platform 37.
 
 ## Known limits
 
-Co-op has been played on two phones (a Galaxy A71 and an A13), and the in-app updater has updated both. Games with more than two phones, saving a game, the break reminder in a team, the statistics page, the NFC tap and controllers have been tested in code but not yet on real hardware. There is no sound yet, only vibration. The pictures above were drawn on a computer by the game's own rendering code at the A71's resolution, not captured from a phone.
+Co-op has been played on two phones (a Galaxy A71 and an A13), and the in-app updater has updated both. Games with more than two phones, saving a game, the break reminder in a team, the statistics page, the NFC tap and controllers have been tested in code but not yet on real hardware. Sound is short synthesised effects made in code, and can be switched off in Settings. The pictures above were drawn on a computer by the game's own rendering code at the A71's resolution, not captured from a phone.
 
 ## Credits
 
 Tessel is a personal project by David Steenvoorden, built together with Claude Code. Every enemy, boss, shape and icon is original and drawn in code. It uses Android, Jetpack Compose (Apache License 2.0) and Google's Nearby Connections.
+
+The code is released under the [MIT License](LICENSE).

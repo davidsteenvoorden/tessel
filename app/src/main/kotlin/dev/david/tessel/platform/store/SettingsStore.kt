@@ -24,6 +24,10 @@ data class Dev(
     val tweaks: Map<Int, Tweak> = emptyMap(),
     /** Upgrade levels to start a trial run with, by upgrade id. */
     val upgrades: Map<Int, Int> = emptyMap(),
+    /** Every enemy that comes in is elite. */
+    val elites: Boolean = false,
+    /** Perk ids to start a trial run with. */
+    val perks: Set<Int> = emptySet(),
     val startStage: Int = 1,
     val startCoins: Int = 0,
     val invincible: Boolean = false,
@@ -33,7 +37,7 @@ data class Dev(
     val active get() = this != Dev()
 
     /** Anything that changes how a run plays once it is going; a start stage or coins only matter at the start. */
-    val changesTheRun get() = invincible || noSpawns || speed != 1f || off.isNotEmpty() || boss >= 0 || tweaks.values.any { it != Tweak() }
+    val changesTheRun get() = invincible || noSpawns || speed != 1f || off.isNotEmpty() || boss >= 0 || elites || tweaks.values.any { it != Tweak() }
 
     fun tweak(kind: Int) = tweaks[kind] ?: Tweak()
 }
@@ -61,6 +65,7 @@ data class Settings(
     val leftHanded: Boolean = false,
     val vibration: Boolean = true,
     val shotVibration: Boolean = true,
+    val sound: Boolean = true,
     val showStats: Boolean = false,
     /** Ping and link type in co-op, top right. */
     val showLink: Boolean = true,
@@ -89,6 +94,7 @@ class SettingsStore(context: Context) {
             .putBoolean(KEY_LEFT, next.leftHanded)
             .putBoolean(KEY_VIBRATION, next.vibration)
             .putBoolean(KEY_SHOT_VIBRATION, next.shotVibration)
+            .putBoolean(KEY_SOUND, next.sound)
             .putBoolean(KEY_STATS, next.showStats)
             .putBoolean(KEY_LINK, next.showLink)
             .putInt(KEY_BREAK, next.breakEvery)
@@ -97,6 +103,8 @@ class SettingsStore(context: Context) {
             .putString(KEY_DEV_OFF, next.dev.off.joinToString(","))
             .putInt(KEY_DEV_BOSS, next.dev.boss)
             .putString(KEY_DEV_TWEAKS, encodeTweaks(next.dev.tweaks))
+            .putBoolean(KEY_DEV_ELITES, next.dev.elites)
+            .putString(KEY_DEV_PERKS, next.dev.perks.joinToString(","))
             .putString(KEY_DEV_UPGRADES, next.dev.upgrades.entries.joinToString(";") { "${it.key}:${it.value}" })
             .putInt(KEY_DEV_STAGE, next.dev.startStage)
             .putInt(KEY_DEV_COINS, next.dev.startCoins)
@@ -112,6 +120,7 @@ class SettingsStore(context: Context) {
         leftHanded = prefs.getBoolean(KEY_LEFT, false),
         vibration = prefs.getBoolean(KEY_VIBRATION, true),
         shotVibration = prefs.getBoolean(KEY_SHOT_VIBRATION, true),
+        sound = prefs.getBoolean(KEY_SOUND, true),
         showStats = prefs.getBoolean(KEY_STATS, debuggable),
         showLink = prefs.getBoolean(KEY_LINK, true),
         breakEvery = prefs.getInt(KEY_BREAK, 0).coerceIn(0, MAX_BREAK_MINUTES),
@@ -121,6 +130,8 @@ class SettingsStore(context: Context) {
             off = prefs.getString(KEY_DEV_OFF, null).orEmpty().split(',').mapNotNull { it.toIntOrNull() }.toSet(),
             boss = prefs.getInt(KEY_DEV_BOSS, -1),
             tweaks = decodeTweaks(prefs.getString(KEY_DEV_TWEAKS, null)),
+            elites = prefs.getBoolean(KEY_DEV_ELITES, false),
+            perks = prefs.getString(KEY_DEV_PERKS, null).orEmpty().split(',').mapNotNull { it.toIntOrNull() }.toSet(),
             upgrades = prefs.getString(KEY_DEV_UPGRADES, null).orEmpty().split(';').mapNotNull {
                 val f = it.split(':')
                 val id = f.getOrNull(0)?.toIntOrNull() ?: return@mapNotNull null
@@ -144,6 +155,7 @@ class SettingsStore(context: Context) {
         const val KEY_LEFT = "left_handed"
         const val KEY_VIBRATION = "vibration"
         const val KEY_SHOT_VIBRATION = "shot_vibration"
+        const val KEY_SOUND = "sound"
         const val KEY_STATS = "show_stats"
         const val KEY_LINK = "show_link"
         const val KEY_BREAK = "break_every"
@@ -153,6 +165,8 @@ class SettingsStore(context: Context) {
         const val KEY_DEV_BOSS = "dev_boss"
         const val KEY_DEV_TWEAKS = "dev_tweaks"
         const val KEY_DEV_UPGRADES = "dev_upgrades"
+        const val KEY_DEV_ELITES = "dev_elites"
+        const val KEY_DEV_PERKS = "dev_perks"
         const val KEY_DEV_STAGE = "dev_stage"
         const val KEY_DEV_COINS = "dev_coins"
         const val KEY_DEV_INVINCIBLE = "dev_invincible"

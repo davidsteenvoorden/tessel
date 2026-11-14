@@ -19,6 +19,7 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import dev.david.tessel.core.content.Bestiary
 import dev.david.tessel.core.content.Difficulty
+import dev.david.tessel.core.content.Perks
 import dev.david.tessel.core.content.Scoring
 import dev.david.tessel.core.content.Upgrades
 import dev.david.tessel.core.net.ClientSession
@@ -40,7 +41,9 @@ import dev.david.tessel.core.stats.RunEntry
 import dev.david.tessel.core.stats.Tally
 import dev.david.tessel.core.tutorial.Tutorial
 import dev.david.tessel.design.Palette
+import dev.david.tessel.core.audio.Synth.Sound
 import dev.david.tessel.platform.audio.Haptics
+import dev.david.tessel.platform.audio.Sfx
 import dev.david.tessel.platform.dev.Trace
 import dev.david.tessel.platform.input.Gamepad
 import dev.david.tessel.platform.input.StickView
@@ -83,6 +86,7 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
     private val hud = Hud(density, resources.configuration.fontScale)
     private val shards = Shards()
     private val haptics = Haptics(context)
+    private val sfx = Sfx(context)
     private val stats = FrameStats()
     private val inputs = Array(MAX_PLAYERS) { PlayerInput() }
     private val moveView = StickView()
@@ -239,6 +243,7 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
             world.players.coins[0] = dev.startCoins
             world.bringDevBoss()
             world.devUpgrades(dev.upgrades)
+            world.devPerks(dev.perks)
         }
         soloSlot = slot
         markCheating(cheat)
@@ -324,6 +329,7 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
             world.devDamage[k] = t.damage
         }
         world.devBoss = d.boss
+        world.devElites = d.elites
         world.devAllow(if (d.off.isEmpty()) null else BooleanArray(Bestiary.size) { it !in d.off })
         if (!solo) return
         if (live && current != Mode.HOME && d.changesTheRun && !cheating) markCheating(true)
@@ -481,6 +487,12 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
         else if (world.shop.buy(world, HOST_PLAYER, slot)) publishShop()
     }
 
+    fun pickPerk(slot: Int) = onGameThread {
+        if (current != Mode.SHOP) return@onGameThread
+        if (playingAs == Role.CLIENT) client?.action(Wire.PERK, slot)
+        else if (world.shop.pickPerk(world, HOST_PLAYER, slot)) publishShop()
+    }
+
     fun heal() = onGameThread {
         if (current != Mode.SHOP) return@onGameThread
         if (playingAs == Role.CLIENT) client?.action(Wire.HEAL)
@@ -498,6 +510,7 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
         if (current != Mode.SHOP) return@onGameThread
         when (playingAs) {
             Role.SOLO -> {
+                if (world.shop.perkPending(HOST_PLAYER)) return@onGameThread
                 world.nextStage()
                 restartClock()
                 enter(Mode.PLAYING)
@@ -560,6 +573,7 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
         controller.stickRadiusDp = s.stickSize.radiusDp
         haptics.enabled = s.vibration
         haptics.shots = s.shotVibration
+        sfx.enabled = s.sound
         handler.post {
             renderer.stickRadius = controller.stickRadius
             renderer.showStats = s.showStats
@@ -581,7 +595,11 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
         updateRunning()
     }
 
-    override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) = fit()
+    override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
+        fit()
+        // A new surface needs its blank home frame drawn again.
+        handler.post { wake(redraw = true) }
+    }
 
     override fun surfaceDestroyed(holder: SurfaceHolder) {
         // Taking the lock waits out a frame that is still drawing.
@@ -622,6 +640,11 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
 
     override fun doFrame(frameTimeNanos: Long) {
         if (!running) return
+        // At home nothing moves: draw the blank ground once and stop asking for frames until a run starts.
+        if (current == Mode.HOME && homeDrawn) {
+            idle = true
+            return
+        }
         choreographer.postFrameCallback(this)
         val now = SystemClock.uptimeMillis()
         val nowNanos = System.nanoTime()
@@ -654,6 +677,7 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
             react(c.view.events, now)
             hud.link(c.roundTripMillis, qualityOf(0))
             hud.score(c.latest?.let { clientScore(it, me) } ?: 0)
+            hud.surge(c.latest?.surge?.get(me) ?: 0)
             shown = c.view
         } else {
             val h = host
@@ -685,6 +709,7 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
             h?.pump(nowNanos, current == Mode.PAUSED, unreachable != 0, breaking)
             if (h == null) hud.link(-1, -1) else showWorstLink(h)
             hud.score(world.score(me))
+            hud.surge((world.players.surge[me] + TICK_HZ - 1) / TICK_HZ)
             shown = world
         }
         // A few times a second is plenty to notice what has come into the arena.
@@ -702,7 +727,9 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
             try {
                 if (current == Mode.HOME) {
                     canvas.drawColor(renderer.palette.ground)
+                    homeDrawn = true
                 } else {
+                    homeDrawn = false
                     renderer.draw(canvas, shown, blend, viewport, shards, moveView, aimView, me)
                     val inset = cutout
                     hud.draw(canvas, shown, renderer.palette, inset.left, inset.top, inset.right, me, now)
@@ -833,6 +860,7 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
             return RunSummary(
                 s.tick / TICK_HZ, s.stage, s.kills[me], s.earned[me], s.difficulty, Integer.bitCount(s.present), s.bossesDown, team,
                 score = breakdown.total, breakdown = breakdown, killedBy = s.killedBy[me],
+                perks = perkNames(s.perks[me]),
             )
         }
         val pl = world.players
@@ -858,8 +886,11 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
         return RunSummary(
             world.tick / TICK_HZ, world.stage, pl.kills[me], pl.earned[me], world.difficulty, world.presentCount(), world.bossesDown, team,
             score = breakdown.total, breakdown = breakdown, killedBy = pl.killedBy[me],
+            perks = perkNames(pl.perks[me]),
         )
     }
+
+    private fun perkNames(mask: Int) = (0 until Perks.count).filter { mask shr it and 1 != 0 }.map { Perks.of(it).name }
 
     /** Player [p]'s score from the newest snapshot; the host works it out from its own world. */
     private fun clientScore(s: Snapshot, p: Int): Int {
@@ -871,11 +902,18 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
     private fun react(ev: Events, now: Long) {
         for (i in 0 until ev.count) {
             when (ev.kind[i]) {
-                Events.SHOT -> if (ev.who[i] == me) haptics.shot(now)
+                Events.SHOT -> if (ev.who[i] == me) {
+                    haptics.shot(now)
+                    sfx.play(Sound.SHOT, now, 60L, 0.7f)
+                }
+                Events.ENEMY_HIT -> sfx.play(Sound.HIT, now, 45L, 0.6f)
+                Events.COIN -> if (ev.who[i] == me) sfx.play(Sound.COIN, now, 35L, 0.8f)
+                Events.STAGE_CLEAR -> sfx.play(Sound.CLEAR, now)
                 Events.ENEMY_KILLED, Events.ENEMY_GONE -> {
                     val type = ev.who[i]
                     if (type !in 0 until Bestiary.size) continue
                     val def = Bestiary.of(type)
+                    sfx.play(Sound.KILL, now, 30L, if (def.boss) 1f else 0.8f)
                     tally.defeat(type, stageNow)
                     shards.burst(
                         def.shape, ev.x[i], ev.y[i], def.radius, ev.angle[i], ev.dx[i], ev.dy[i],
@@ -883,13 +921,20 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
                     )
                 }
                 Events.BOSS_IN -> {
+                    sfx.play(Sound.BOSS, now)
                     tally.see(ev.who[i], stageNow)
                     hud.announce(ev.who[i], now)
                     haptics.down()
                 }
                 Events.BOSS_DOWN -> haptics.down()
-                Events.PLAYER_HIT -> if (ev.who[i] == me) haptics.hurt()
-                Events.PLAYER_DOWN -> if (ev.who[i] == me) haptics.down()
+                Events.PLAYER_HIT -> if (ev.who[i] == me) {
+                    haptics.hurt()
+                    sfx.play(Sound.HURT, now, 80L)
+                }
+                Events.PLAYER_DOWN -> if (ev.who[i] == me) {
+                    haptics.down()
+                    sfx.play(Sound.DOWN, now)
+                }
                 Events.REVIVED -> if (ev.who[i] == me) haptics.hurt()
                 Events.SHOP_OPEN -> if (playingAs != Role.CLIENT) {
                     host?.clearReady()
@@ -1069,7 +1114,12 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
                 price = s.price(world, me, slot),
                 maxed = s.maxed(world, me, slot),
                 affordable = s.canBuy(world, me, slot),
+                rare = s.isRare(me, slot),
+                levels = s.levelsBought(world, me, slot),
             )
+        }
+        val perkOffers = (0 until Perks.OFFERED).mapNotNull { k ->
+            s.perkOffer(me, k).takeIf { it >= 0 }?.let { PerkOffer(k, Perks.of(it).name, Perks.of(it).blurb) }
         }
         val ready = host?.ready ?: 0
         publishedReady = ready
@@ -1088,6 +1138,7 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
             selfReady = ready and (1 shl HOST_PLAYER) != 0,
             readyCount = Integer.bitCount(ready),
             teamSize = world.presentCount(),
+            perkOffers = perkOffers,
         )
     }
 
@@ -1103,7 +1154,9 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
             key = key * 31 + s.shopItem[slot]
             key = key * 31 + s.shopLevel[slot]
             key = key * 31 + s.shopPrice[slot]
+            key = key * 31 + (if (s.shopRare[slot]) 1 else 0)
         }
+        for (k in 0 until Perks.OFFERED) key = key * 31 + s.perkOffer[k]
         if (key == clientShopKey && shopFlow.value != null) return
         clientShopKey = key
 
@@ -1121,7 +1174,12 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
                 price = s.shopPrice[slot],
                 maxed = s.shopMaxed[slot],
                 affordable = s.shopAffordable[slot],
+                rare = s.shopRare[slot],
+                levels = if (s.shopRare[slot]) minOf(3, def.maxLevel - s.shopLevel[slot]) else 1,
             )
+        }
+        val perkOffers = (0 until Perks.OFFERED).mapNotNull { k ->
+            s.perkOffer[k].takeIf { it >= 0 }?.let { PerkOffer(k, Perks.of(it).name, Perks.of(it).blurb) }
         }
         shopFlow.value = ShopView(
             stage = s.stage,
@@ -1138,6 +1196,7 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
             selfReady = s.ready and (1 shl me) != 0,
             readyCount = Integer.bitCount(s.ready),
             teamSize = Integer.bitCount(s.present),
+            perkOffers = perkOffers,
         )
     }
 
@@ -1152,6 +1211,7 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
         if (mode != Mode.PAUSED) breaking = false
         if (mode != current) Trace.log("mode $current to $mode, role=$playingAs")
         current = mode
+        if (mode != Mode.HOME) wake()
         // Before the mode, so a menu that sees the pause also sees why.
         if (playingAs != Role.CLIENT || mode != Mode.PAUSED) breakFlow.value = breaking && mode == Mode.PAUSED
         modeFlow.value = mode
@@ -1162,12 +1222,28 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
         pendingNanos = 0L
     }
 
+    /** The blank home frame is on the screen, so no more frames are needed there. */
+    private var homeDrawn = false
+    private var idle = false
+
+    /** Starts the frame loop again after it stopped at home, or after the surface changed. */
+    private fun wake(redraw: Boolean = false) {
+        if (redraw) homeDrawn = false
+        if (!running || !idle && !redraw) return
+        idle = false
+        restartClock()
+        choreographer.removeFrameCallback(this)
+        choreographer.postFrameCallback(this)
+    }
+
     private fun updateRunning() {
         val shouldRun = resumed && synchronized(surfaceLock) { surfaceLive }
         if (shouldRun == running) return
         running = shouldRun
         if (shouldRun) {
             handler.post {
+                homeDrawn = false
+                idle = false
                 restartClock()
                 // A quick pause and resume can leave the old callback queued; two would double the game speed.
                 choreographer.removeFrameCallback(this)

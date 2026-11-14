@@ -95,7 +95,15 @@ fun PausePanel(
                 )
             }
         }
-        if (stats != null && !practice) RunStats(stats, Modifier.weight(1f).padding(top = Space.x1))
+        if (stats != null && !practice) {
+            Column(Modifier.weight(1f).padding(top = Space.x1)) {
+                RunStats(stats)
+                if (stats.perks.isNotEmpty()) {
+                    Spacer(Modifier.height(Space.x3))
+                    Text("Perks: " + stats.perks.joinToString(", "), Type.footnote, c.ink2)
+                }
+            }
+        }
     }
 }
 

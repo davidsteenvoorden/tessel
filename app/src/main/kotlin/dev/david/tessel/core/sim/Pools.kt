@@ -1,7 +1,12 @@
 package dev.david.tessel.core.sim
 
 import dev.david.tessel.core.content.Balance
+import dev.david.tessel.core.content.Elite
+import dev.david.tessel.core.content.Perks
 import dev.david.tessel.core.content.Upgrades
+
+/** Ticks without a hit before Overclock kicks in. */
+const val OVERCLOCK_TICKS = 8 * TICK_HZ
 
 /*
  * Entity storage as parallel arrays. Removal swaps the last entry into the
@@ -60,15 +65,42 @@ class PlayerState {
     /** Upgrade levels bought so far, all kinds together. */
     fun bought(p: Int) = levels[p].sum()
 
-    fun damage(p: Int) = scaled(p, Upgrades.DAMAGE, Balance.BULLET_DAMAGE)
-    fun fireRate(p: Int) = scaled(p, Upgrades.FIRE_RATE, Balance.FIRE_RATE)
+    /** Perks taken, as a mask of [Perks] ids. */
+    val perks = IntArray(MAX_PLAYERS)
+
+    /** Second Wind spent this stage. */
+    val windUsed = BooleanArray(MAX_PLAYERS)
+
+    /** Ticks since this player was last hit, for Overclock. */
+    val sinceHit = IntArray(MAX_PLAYERS)
+
+    /** Ticks left of a surge from an elite. */
+    val surge = IntArray(MAX_PLAYERS)
+
+    fun has(p: Int, perk: Int) = perks[p] shr perk and 1 != 0
+
+    fun damage(p: Int): Float {
+        var d = scaled(p, Upgrades.DAMAGE, Balance.BULLET_DAMAGE)
+        if (has(p, Perks.HEAVY_ROUNDS)) d *= 1.3f
+        if (has(p, Perks.LAST_STAND) && hp[p] in 1..2) d *= 1.5f
+        if (surge[p] > 0) d *= Elite.SURGE_DAMAGE
+        return d
+    }
+
+    fun fireRate(p: Int): Float {
+        var r = scaled(p, Upgrades.FIRE_RATE, Balance.FIRE_RATE)
+        if (has(p, Perks.OVERCLOCK) && sinceHit[p] >= OVERCLOCK_TICKS) r *= 1.3f
+        if (has(p, Perks.HEAVY_ROUNDS)) r *= 0.85f
+        if (surge[p] > 0) r *= Elite.SURGE_FIRE
+        return r
+    }
     fun volley(p: Int) = 1 + levels[p][Upgrades.MULTISHOT]
     fun bulletSpeed(p: Int) = scaled(p, Upgrades.VELOCITY, Balance.BULLET_SPEED)
-    fun pierce(p: Int) = levels[p][Upgrades.PIERCE]
+    fun pierce(p: Int) = levels[p][Upgrades.PIERCE] + if (has(p, Perks.HEAVY_ROUNDS)) 1 else 0
     fun range(p: Int) = scaled(p, Upgrades.RANGE, Balance.BULLET_RANGE)
-    fun moveSpeed(p: Int) = scaled(p, Upgrades.SPEED, Balance.PLAYER_SPEED)
+    fun moveSpeed(p: Int) = scaled(p, Upgrades.SPEED, Balance.PLAYER_SPEED) * if (has(p, Perks.QUICK_FEET)) 1.15f else 1f
     fun wealth(p: Int) = Upgrades.of(Upgrades.WEALTH).step * levels[p][Upgrades.WEALTH]
-    fun magnet(p: Int) = scaled(p, Upgrades.MAGNET, Balance.MAGNET_RADIUS)
+    fun magnet(p: Int) = scaled(p, Upgrades.MAGNET, Balance.MAGNET_RADIUS) * if (has(p, Perks.MAGNET_CORE)) 2f else 1f
     fun bulletRadius(p: Int) = scaled(p, Upgrades.CALIBER, Balance.BULLET_RADIUS)
 
     private fun scaled(p: Int, upgrade: Int, base: Float) = base * (1f + Upgrades.of(upgrade).step * levels[p][upgrade])
@@ -101,6 +133,10 @@ class PlayerState {
             downs[i] = 0
             revived[i] = 0
             levels[i].fill(0)
+            perks[i] = 0
+            windUsed[i] = false
+            sinceHit[i] = OVERCLOCK_TICKS
+            surge[i] = 0
         }
     }
 
@@ -226,6 +262,9 @@ class EnemyPool(private val capacity: Int) {
     /** 0..1 build-up before an attack, drawn so nothing fires without warning. */
     val cue = FloatArray(capacity)
 
+    /** An [Elite] trait, or 0. */
+    val elite = IntArray(capacity)
+
     var count = 0
         private set
 
@@ -251,6 +290,7 @@ class EnemyPool(private val capacity: Int) {
         modeTicks[i] = 0
         aux[i] = 0f
         cue[i] = 0f
+        elite[i] = 0
         return i
     }
 
@@ -289,6 +329,7 @@ class EnemyPool(private val capacity: Int) {
         modeTicks[i] = modeTicks[last]
         aux[i] = aux[last]
         cue[i] = cue[last]
+        elite[i] = elite[last]
     }
 }
 

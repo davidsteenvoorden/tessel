@@ -2,6 +2,10 @@ package dev.david.tessel.core.net
 
 import dev.david.tessel.core.content.Bestiary
 import dev.david.tessel.core.content.Difficulty
+import dev.david.tessel.core.content.Elite
+import dev.david.tessel.core.content.Perks
+import dev.david.tessel.core.sim.RARE_BIT
+import dev.david.tessel.core.sim.TICK_HZ
 import dev.david.tessel.core.sim.Events
 import dev.david.tessel.core.sim.MAX_COINS
 import dev.david.tessel.core.sim.MAX_ENEMIES
@@ -111,13 +115,15 @@ object Protocol {
             buf.putShort(pl.bought(p).toShort())
             buf.putInt(pl.points[p])
             buf.put(pl.killedBy[p].toByte())
+            buf.putInt(pl.perks[p])
+            buf.put((if (pl.surge[p] == 0) 0 else (pl.surge[p] / TICK_HZ + 1).coerceAtMost(255)).toByte())
         }
 
         val e = w.enemies
         buf.putShort(e.count.toShort())
         for (i in 0 until e.count) {
             buf.putShort(e.id[i].toShort())
-            buf.put(e.type[i].toByte())
+            buf.put((e.type[i] or (e.elite[i] shl 5)).toByte())
             Wire.putPos(buf, e.x[i])
             Wire.putPos(buf, e.y[i])
             // Top bit: hit flash. The rest: how far along its next attack is.
@@ -125,7 +131,9 @@ object Protocol {
             buf.put((cue or if (e.flash[i] > 0) 0x80 else 0).toByte())
             buf.put((e.angle[i] * ANGLE_SCALE).toInt().coerceIn(-127, 127).toByte())
             // Health, so a joining phone can tell when its own shots finish something. Not for bosses.
-            val hp = if (Bestiary.of(e.type[i]).boss) UNKNOWN_HP else (e.hp[i] * HP_SCALE).toInt().coerceIn(1, UNKNOWN_HP - 1)
+            // An armored elite counts double, since each shot does half; the joining phone does not know about armor.
+            val armor = if (e.elite[i] == Elite.ARMORED) 1f / Elite.ARMOR else 1f
+            val hp = if (Bestiary.of(e.type[i]).boss) UNKNOWN_HP else (e.hp[i] * armor * HP_SCALE).toInt().coerceIn(1, UNKNOWN_HP - 1)
             buf.putShort(hp.toShort())
         }
 
@@ -169,7 +177,7 @@ object Protocol {
             val s = w.shop
             for (slot in 0 until SHOP_SLOTS) {
                 val u = s.item(forPlayer, slot)
-                buf.put(u.toByte())
+                buf.put(s.raw(forPlayer, slot).toByte())
                 buf.put((if (u >= 0) pl.levels[forPlayer][u] else 0).toByte())
                 buf.putInt(s.price(w, forPlayer, slot))
                 buf.put((if (s.maxed(w, forPlayer, slot)) 1 else 0).toByte())
@@ -180,6 +188,7 @@ object Protocol {
             buf.put((if (s.canHeal(w, forPlayer)) 1 else 0).toByte())
             buf.putInt(s.rerollPrice(w, forPlayer))
             buf.put((if (s.canReroll(w, forPlayer)) 1 else 0).toByte())
+            for (k in 0 until Perks.OFFERED) buf.put(s.perkOffer(forPlayer, k).toByte())
         }
     }
 
@@ -235,13 +244,17 @@ object Protocol {
             s.bought[p] = buf.short.toInt()
             s.points[p] = buf.int
             s.killedBy[p] = buf.get().toInt()
+            s.perks[p] = buf.int
+            s.surge[p] = buf.get().toInt() and 0xFF
         }
 
         s.enemyCount = buf.short.toInt().coerceIn(0, MAX_ENEMIES)
         s.enemyIndex.clear()
         for (i in 0 until s.enemyCount) {
             s.enemyId[i] = buf.short.toInt() and 0xFFFF
-            s.enemyType[i] = buf.get().toInt()
+            val typeByte = buf.get().toInt() and 0xFF
+            s.enemyType[i] = typeByte and 0x1F
+            s.enemyElite[i] = typeByte shr 5
             s.enemyX[i] = Wire.getPos(buf)
             s.enemyY[i] = Wire.getPos(buf)
             val packed = buf.get().toInt()
@@ -291,7 +304,9 @@ object Protocol {
         s.hasShop = buf.get().toInt() != 0
         if (s.hasShop) {
             for (slot in 0 until SHOP_SLOTS) {
-                s.shopItem[slot] = buf.get().toInt()
+                val raw = buf.get().toInt()
+                s.shopItem[slot] = if (raw < 0) -1 else raw and RARE_BIT.inv()
+                s.shopRare[slot] = raw >= 0 && raw and RARE_BIT != 0
                 s.shopLevel[slot] = buf.get().toInt()
                 s.shopPrice[slot] = buf.int
                 s.shopMaxed[slot] = buf.get().toInt() != 0
@@ -302,6 +317,10 @@ object Protocol {
             s.canHeal = buf.get().toInt() != 0
             s.rerollPrice = buf.int
             s.canReroll = buf.get().toInt() != 0
+            for (k in 0 until Perks.OFFERED) {
+                val id = buf.get().toInt()
+                s.perkOffer[k] = if (id in 0 until Perks.count) id else -1
+            }
         }
     }
 

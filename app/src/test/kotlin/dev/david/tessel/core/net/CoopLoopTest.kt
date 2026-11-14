@@ -336,6 +336,8 @@ class CoopLoopTest {
         // 40 ms each way, give or take a frame for when things are read.
         assertEquals(80f, client.roundTripMillis.toFloat(), 20f)
         assertEquals(80f, host.roundTripMillis(CLIENT).toFloat(), 20f)
+        // A healthy link keeps every snapshot.
+        assertTrue(!host.isThrottled(CLIENT))
     }
 
     @Test

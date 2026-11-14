@@ -50,6 +50,7 @@ fun ShopPanel(
     onHeal: () -> Unit,
     onReroll: () -> Unit,
     onNext: () -> Unit,
+    onPerk: (Int) -> Unit = {},
 ) {
     val c = Theme.colors
     val view = LocalView.current
@@ -69,6 +70,33 @@ fun ShopPanel(
             CoinAmount(shop.coins, style = Type.title3)
         }
         Spacer(Modifier.height(Space.x3))
+
+        // After a boss: one perk to take before the shop can be left.
+        if (shop.perkOffers.isNotEmpty()) {
+            Text("Choose a Perk", Type.headline, c.ink)
+            Text("It stays for the rest of the run.", Type.footnote, c.ink3)
+            Spacer(Modifier.height(Space.x2))
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                for (offer in shop.perkOffers) {
+                    Tile(
+                        name = offer.name,
+                        blurb = offer.blurb,
+                        enabled = true,
+                        faded = false,
+                        onClick = {
+                            tap()
+                            onPerk(offer.slot)
+                        },
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Spacer(Modifier.weight(1f))
+                        Text("Take", Type.subhead, c.ink)
+                    }
+                }
+                repeat(COLUMNS - shop.perkOffers.size) { Spacer(Modifier.weight(1f)) }
+            }
+            Spacer(Modifier.height(Space.x4))
+        }
 
         val tiles = ArrayList<@Composable (Modifier) -> Unit>()
         for (offer in shop.offers) {
@@ -101,10 +129,11 @@ fun ShopPanel(
                 trailing = { CoinAmount(shop.rerollPrice, color = if (shop.canReroll) c.ink2 else c.ink3, style = Type.subhead) },
             )
             Spacer(Modifier.weight(1f))
+            val choosing = shop.perkOffers.isNotEmpty()
             when {
-                !shop.coop -> PrimaryButton("Next Stage", onNext, Modifier.width(220.dp))
+                !shop.coop -> PrimaryButton("Next Stage", onNext, Modifier.width(220.dp), enabled = !choosing)
                 shop.selfReady -> PrimaryButton("Waiting for Others", {}, Modifier.width(220.dp), enabled = false)
-                else -> PrimaryButton("Ready", onNext, Modifier.width(220.dp))
+                else -> PrimaryButton("Ready", onNext, Modifier.width(220.dp), enabled = !choosing)
             }
         }
     }
@@ -114,8 +143,8 @@ fun ShopPanel(
 private fun OfferTile(offer: ShopOffer, modifier: Modifier, onBuy: () -> Unit) {
     val c = Theme.colors
     Tile(
-        name = offer.name,
-        blurb = offer.blurb,
+        name = if (offer.rare) "Rare ${offer.name}" else offer.name,
+        blurb = if (offer.rare) "+${offer.levels} levels in one buy" else offer.blurb,
         enabled = offer.affordable,
         faded = offer.maxed,
         onClick = onBuy,

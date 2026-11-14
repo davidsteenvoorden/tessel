@@ -34,6 +34,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import dev.david.tessel.core.content.Bestiary
+import dev.david.tessel.core.content.Perks
 import dev.david.tessel.core.content.Upgrades
 import dev.david.tessel.ui.components.NavRow
 import dev.david.tessel.ui.components.PrimaryButton
@@ -146,6 +147,19 @@ fun DevScreen(
                             options = DEV_SPEEDS.map { if (it == 1f) "1x" else "${it}x".replace(".0x", "x") },
                             selected = DEV_SPEEDS.indexOf(dev.speed).coerceAtLeast(0),
                             onSelect = { i -> change { it.copy(speed = DEV_SPEEDS[i]) } },
+                        )
+                    }
+                }
+
+                Group("Elites and Perks", footer = "Elites: every enemy that comes is elite. Perks: taken at the start of a trial run.") {
+                    ToggleRow("Elite Enemies", dev.elites, { v -> change { it.copy(elites = v) } })
+                    for (k in 0 until Perks.count) {
+                        Divider()
+                        ToggleRow(
+                            Perks.of(k).name,
+                            k in dev.perks,
+                            { v -> change { it.copy(perks = if (v) it.perks + k else it.perks - k) } },
+                            detail = Perks.of(k).blurb,
                         )
                     }
                 }

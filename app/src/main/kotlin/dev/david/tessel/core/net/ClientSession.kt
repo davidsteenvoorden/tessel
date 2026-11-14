@@ -350,6 +350,7 @@ class ClientSession(val me: Int, private var players: Int, private val send: (By
                 e.flash[k] = if (to.enemyFlash[i] || justHit(to.enemyId[i])) 1 else 0
                 e.angle[k] = angle
                 e.cue[k] = to.enemyCue[i]
+                e.elite[k] = to.enemyElite[i]
             }
         }
 

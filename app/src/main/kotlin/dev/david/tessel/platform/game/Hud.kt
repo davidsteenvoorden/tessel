@@ -65,6 +65,13 @@ class Hud(private val density: Float, fontScale: Float) {
         score = value
     }
 
+    private var surgeSeconds = 0
+
+    /** Seconds left of a surge, 0 for none. */
+    fun surge(seconds: Int) {
+        surgeSeconds = seconds
+    }
+
     private var announced = -1
     private var announcedAt = 0L
 
@@ -125,6 +132,10 @@ class Hud(private val density: Float, fontScale: Float) {
         }
 
         if (practice) return
+        if (surgeSeconds > 0) {
+            note.color = palette.coin
+            canvas.drawText("Surge $surgeSeconds", insetLeft + 20f * density + 30f * density, coinRow + 22f * density + (w.playerCount - 1) * 14f * density, note)
+        }
         drawStageBar(canvas, w, palette, insetTop, me)
         drawClock(canvas, w, palette, insetTop, insetRight)
         drawAnnouncement(canvas, palette, now)

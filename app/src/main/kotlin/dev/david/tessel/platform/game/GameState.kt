@@ -27,7 +27,13 @@ class ShopOffer(
     /** Bought to its last level. */
     val maxed: Boolean,
     val affordable: Boolean,
+    /** A rare upgrade: [levels] levels in one buy. */
+    val rare: Boolean = false,
+    val levels: Int = 1,
 )
+
+/** One perk on offer after a boss. */
+class PerkOffer(val slot: Int, val name: String, val blurb: String)
 
 class ShopView(
     val stage: Int,
@@ -45,6 +51,8 @@ class ShopView(
     val selfReady: Boolean = false,
     val readyCount: Int = 0,
     val teamSize: Int = 1,
+    /** Perks to choose from; the shop cannot be left until one is taken. */
+    val perkOffers: List<PerkOffer> = emptyList(),
 )
 
 /** One player's column in the run's statistics. */
@@ -81,8 +89,10 @@ class RunSummary(
     val killedBy: Int = Cause.NONE,
     /** The best solo score on this difficulty so far. */
     val newBest: Boolean = false,
+    /** Names of the perks taken so far. */
+    val perks: List<String> = emptyList(),
 ) {
     val you get() = team.firstOrNull { it.you }
 
-    fun withBest(best: Boolean) = RunSummary(seconds, stage, kills, coins, difficulty, players, bosses, team, score, breakdown, killedBy, best)
+    fun withBest(best: Boolean) = RunSummary(seconds, stage, kills, coins, difficulty, players, bosses, team, score, breakdown, killedBy, best, perks)
 }

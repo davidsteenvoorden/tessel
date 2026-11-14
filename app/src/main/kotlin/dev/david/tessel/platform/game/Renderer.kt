@@ -7,6 +7,7 @@ import android.graphics.RectF
 import android.graphics.Typeface
 import dev.david.tessel.core.content.Balance
 import dev.david.tessel.core.content.Bestiary
+import dev.david.tessel.core.content.Elite
 import dev.david.tessel.core.content.Move
 import dev.david.tessel.core.content.Shape
 import dev.david.tessel.core.sim.REVIVE_TICKS
@@ -164,6 +165,17 @@ class Renderer(private val density: Float, palette: Palette) {
             if (cue > 0f && !charges(type)) {
                 fill.color = palette.danger
                 canvas.drawCircle(x, y, r * (0.2f + 0.25f * cue), fill)
+            }
+            // An elite wears a gold ring: thick when armored, dashed-looking thin for the quick ones.
+            val trait = e.elite[i]
+            if (trait != 0) {
+                line.strokeCap = Paint.Cap.BUTT
+                line.color = palette.coin
+                line.strokeWidth = (if (trait == Elite.ARMORED) 4.5f else 2.5f) * density
+                canvas.drawCircle(x, y, r * 1.3f + 2f * density, line)
+                if (trait == Elite.SPLITTING || trait == Elite.BURSTING) {
+                    canvas.drawCircle(x, y, r * 1.3f + 7f * density, line)
+                }
             }
             // The Apiary's shield while its drones fly.
             if (type == Bestiary.APIARY && drones > 0) {

@@ -3,6 +3,8 @@ package dev.david.tessel.core.sim
 import dev.david.tessel.core.content.Balance
 import dev.david.tessel.core.content.Bestiary
 import dev.david.tessel.core.content.Difficulty
+import dev.david.tessel.core.content.Elite
+import dev.david.tessel.core.content.Perks
 import dev.david.tessel.core.content.Scoring
 import dev.david.tessel.core.content.Upgrades
 import dev.david.tessel.core.rng.Rng
@@ -52,6 +54,7 @@ private const val BOSS_DELAY_TICKS = 90
 
 /** While its drones fly, the Apiary takes this share of each hit. */
 private const val SHIELDED_DAMAGE = 0.3f
+private const val SHOCKWAVE_DAMAGE = 4f
 
 val INVULN_TICKS = (Balance.INVULN_SECONDS * TICK_HZ).toInt()
 val HOSTILE_TICKS = (Balance.HOSTILE_SECONDS * TICK_HZ).toInt()
@@ -119,6 +122,18 @@ class World(seed: Long = 1L) {
             if (id == Upgrades.MAX_HEALTH) {
                 players.maxHp[0] += n
                 players.hp[0] = players.maxHp[0]
+            }
+        }
+    }
+
+    /** Developer option: perks the player starts with. */
+    fun devPerks(ids: Set<Int>) {
+        for (k in ids) {
+            if (k !in 0 until Perks.count || players.has(0, k)) continue
+            players.perks[0] = players.perks[0] or (1 shl k)
+            if (k == Perks.THICK_SKIN) {
+                players.maxHp[0] += 2
+                players.hp[0] += 2
             }
         }
     }
@@ -257,6 +272,7 @@ class World(seed: Long = 1L) {
                 players.killedBy[p] = Cause.NONE
             }
         }
+        for (p in 0 until playerCount) players.windUsed[p] = false
         players.remember()
         director.startStage()
         bossDue = if (isBossStage()) BOSS_DELAY_TICKS else -1
@@ -284,6 +300,7 @@ class World(seed: Long = 1L) {
             cp.downs[p] = pl.downs[p]
             cp.revived[p] = pl.revived[p]
             pl.levels[p].copyInto(cp.levels[p])
+            cp.perks[p] = pl.perks[p]
         }
         if (cp.inShop) shop.keep(cp)
         return cp
@@ -310,6 +327,7 @@ class World(seed: Long = 1L) {
             pl.downs[p] = cp.downs[p]
             pl.revived[p] = cp.revived[p]
             cp.levels[p].copyInto(pl.levels[p])
+            pl.perks[p] = cp.perks[p]
             pl.present[p] = seated(p)
             if (!pl.present[p]) pl.hp[p] = 0 else if (pl.hp[p] <= 0) pl.hp[p] = max(1, pl.maxHp[p] / 2)
         }
@@ -369,6 +387,24 @@ class World(seed: Long = 1L) {
 
     /** 0..1 health of the boss on the field. */
     fun bossHealth(): Float = if (boss >= 0) (enemies.hp[boss] / enemies.maxHp[boss]).coerceIn(0f, 1f) else shownBossHealth
+
+    /** Developer option: every enemy that turns up is elite. */
+    var devElites = false
+
+    /** Makes enemy [i] elite with some chance for this stage, or always with the developer option. */
+    fun maybeElite(i: Int) {
+        if (i < 0) return
+        val def = Bestiary.of(enemies.type[i])
+        if (def.boss || def.from == 0 || def.cost < 1f) return
+        if (!devElites && rng.nextFloat() >= Elite.chance(stage)) return
+        makeElite(i, rng.int(1, Elite.COUNT - 1))
+    }
+
+    fun makeElite(i: Int, trait: Int) {
+        enemies.elite[i] = trait
+        enemies.hp[i] *= Elite.HEALTH
+        enemies.maxHp[i] *= Elite.HEALTH
+    }
 
     fun spawnEnemy(type: Int, x: Float, y: Float): Int {
         val def = Bestiary.of(type)
@@ -548,6 +584,8 @@ class World(seed: Long = 1L) {
         if (!standing && playerCount == 1) return
         if (pl.invuln[p] > 0) pl.invuln[p]--
         if (pl.hurt[p] > 0) pl.hurt[p]--
+        if (pl.sinceHit[p] < OVERCLOCK_TICKS) pl.sinceHit[p]++
+        if (pl.surge[p] > 0) pl.surge[p]--
 
         val travel = pl.moveSpeed(p) * (if (standing) 1f else Balance.DOWNED_SPEED) * TICK_SECONDS
         val r = Balance.PLAYER_RADIUS
@@ -709,7 +747,8 @@ class World(seed: Long = 1L) {
         val e = enemies
         val def = Bestiary.of(e.type[j])
         val shielded = e.type[j] == Bestiary.APIARY && brains.escorts > 0
-        val dealt = damage * (if (shielded) SHIELDED_DAMAGE else 1f)
+        val armored = e.elite[j] == Elite.ARMORED
+        val dealt = damage * (if (shielded) SHIELDED_DAMAGE else 1f) * (if (armored) Elite.ARMOR else 1f)
         // Overkill does not count: a huge shot into a nearly dead enemy dealt what it had left.
         if (owner in 0 until playerCount) players.dealt[owner] += min(dealt, max(e.hp[j], 0f))
         e.hp[j] -= dealt
@@ -728,8 +767,13 @@ class World(seed: Long = 1L) {
         val def = Bestiary.of(e.type[j])
         events.add(Events.ENEMY_KILLED, e.type[j], e.x[j], e.y[j], ux, uy, e.angle[j], e.id[j])
         players.kills[owner]++
-        players.points[owner] += Scoring.kill(e.type[j])
-        val drops = if (def.coinChance >= 1f || rng.nextFloat() < def.coinChance) def.coins else 0
+        val elite = e.elite[j] != Elite.NONE
+        players.points[owner] += Scoring.kill(e.type[j]) * (if (elite) 3 else 1)
+        if (players.has(owner, Perks.SIPHON) && players.kills[owner] % 25 == 0 && players.hp[owner] in 1 until players.maxHp[owner]) {
+            players.hp[owner]++
+        }
+        if (elite && rng.nextFloat() < Elite.SURGE_CHANCE) players.surge[owner] = Elite.SURGE_SECONDS * TICK_HZ
+        val drops = (if (def.coinChance >= 1f || rng.nextFloat() < def.coinChance) def.coins else 0) * (if (elite) 2 else 1)
         val fling = if (def.boss) 260f else 150f
         repeat(drops) {
             val a = rng.range(0f, TWO_PI)
@@ -837,9 +881,17 @@ class World(seed: Long = 1L) {
         val pl = players
         val px = pl.x[p]
         val py = pl.y[p]
+        pl.sinceHit[p] = 0
         if (!practice && !invincible) {
             val by = Cause.type(cause)
-            pl.hp[p] -= if (by in 0 until Bestiary.size) devDamage[by] else 1
+            val loss = if (by in 0 until Bestiary.size) devDamage[by] else 1
+            if (pl.hp[p] - loss <= 0 && pl.has(p, Perks.SECOND_WIND) && !pl.windUsed[p]) {
+                // A hit that would down the player leaves them on one health, once a stage.
+                pl.hp[p] = 1
+                pl.windUsed[p] = true
+            } else {
+                pl.hp[p] -= loss
+            }
         }
         pl.taken[p]++
         pl.invuln[p] = INVULN_TICKS
@@ -854,6 +906,7 @@ class World(seed: Long = 1L) {
             val d2 = dx * dx + dy * dy
             if (d2 >= radius * radius || d2 < 0.0001f) continue
             val d = sqrt(d2)
+            if (pl.has(p, Perks.SHOCKWAVE) && e.hp[j] > 0f) damageEnemy(j, SHOCKWAVE_DAMAGE, dx / d, dy / d, p)
             val force = Balance.HIT_SHOVE * (1f - d / radius) / Bestiary.of(e.type[j]).mass
             e.kx[j] += dx / d * force
             e.ky[j] += dy / d * force

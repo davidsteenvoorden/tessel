@@ -122,7 +122,7 @@ class Director {
         } else {
             repeat(size) {
                 edgePoint(w, r)
-                w.spawnEnemy(type, ex, ey)
+                w.maybeElite(w.spawnEnemy(type, ex, ey))
             }
         }
     }

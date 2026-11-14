@@ -99,6 +99,7 @@ class HostSession(private val world: World, private val send: (player: Int, byte
                     Wire.HEAL -> world.shop.heal(world, player)
                     Wire.REROLL -> world.shop.reroll(world, player)
                     Wire.READY -> markReady(player)
+                    Wire.PERK -> world.shop.pickPerk(world, player, arg)
                     else -> onRequest?.invoke(kind)
                 }
             }
@@ -127,6 +128,8 @@ class HostSession(private val world: World, private val send: (player: Int, byte
     fun spreadMillis(player: Int): Int = (trail[player].jitter.spreadNanos / 1_000_000L).toInt()
 
     fun markReady(player: Int) {
+        // A perk on offer has to be taken first.
+        if (world.shop.perkPending(player)) return
         ready = ready or (1 shl player)
     }
 
@@ -179,14 +182,30 @@ class HostSession(private val world: World, private val send: (player: Int, byte
                 outbox[p].clear()
                 born[p].clear()
                 gone[p].clear()
-                val due = nextSendNanos[p] + SNAPSHOT_NANOS
-                nextSendNanos[p] = if (due < nowNanos) nowNanos + SNAPSHOT_NANOS else due
+                val step = SNAPSHOT_NANOS * beatsFor(p)
+                val due = nextSendNanos[p] + step
+                nextSendNanos[p] = if (due < nowNanos) nowNanos + step else due
             }
         }
     }
 
     /** Round trip to [player]'s phone in milliseconds, smoothed, or -1 before it is known. */
     fun roundTripMillis(player: Int): Int = roundTrip[player].toInt()
+
+    private val slow = BooleanArray(MAX_PLAYERS)
+
+    /**
+     * A link that is far behind gets every other snapshot, which halves what it has to carry, and
+     * goes back to the full rate once it recovers. The gap between the two limits stops it flapping.
+     */
+    private fun beatsFor(p: Int): Int {
+        val rtt = roundTrip[p]
+        if (rtt > SLOW_RTT_MS) slow[p] = true else if (rtt in 0f..RECOVER_RTT_MS) slow[p] = false
+        return if (slow[p]) 2 else 1
+    }
+
+    /** Whether the link to [player] is being sent half the snapshots. */
+    fun isThrottled(player: Int) = slow[player]
 
     /** Tells every other phone a fresh run has begun, and which player it is. */
     fun announceStart() {
@@ -210,6 +229,8 @@ class HostSession(private val world: World, private val send: (player: Int, byte
 
         /** 30 snapshots a second: small enough now that bullets do not travel. */
         const val SNAPSHOT_NANOS = 1_000_000_000L / 30
+        const val SLOW_RTT_MS = 220f
+        const val RECOVER_RTT_MS = 130f
         const val SEND_SLACK_NANOS = 4_000_000L
         const val STALE_NANOS = 400_000_000L
     }

@@ -204,7 +204,7 @@ fun TesselApp(
 
         Sheet(visible = mode == Mode.SHOP, onDismiss = null) {
             (shop ?: lastShop)?.let {
-                ShopPanel(it, settings.vibration, game::buy, game::heal, game::reroll, game::nextStage)
+                ShopPanel(it, settings.vibration, game::buy, game::heal, game::reroll, game::nextStage, game::pickPerk)
             }
         }
 

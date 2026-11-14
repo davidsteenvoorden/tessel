@@ -3,6 +3,7 @@ package dev.david.tessel.core.sim
 import dev.david.tessel.core.content.Attack
 import dev.david.tessel.core.content.Balance
 import dev.david.tessel.core.content.Bestiary
+import dev.david.tessel.core.content.Elite
 import dev.david.tessel.core.content.EnemyDef
 import dev.david.tessel.core.content.Move
 import kotlin.math.PI
@@ -87,7 +88,7 @@ internal class Brains(private val w: World) {
         for (i in 0 until n) {
             if (e.hp[i] <= 0f) continue
             val def = Bestiary.of(e.type[i])
-            val scale = baseScale * w.devSpeed[e.type[i]]
+            val scale = baseScale * w.devSpeed[e.type[i]] * (if (e.elite[i] == Elite.FAST) Elite.SPEED else 1f)
             shooter = e.type[i]
             if (e.flash[i] > 0) e.flash[i]--
             val target = w.nearestPlayer(e.x[i], e.y[i])
@@ -138,6 +139,20 @@ internal class Brains(private val w: World) {
             }
         }
         if (def.deathRing > 0) ring(x, y, def.deathRing, w.rng.range(0f, TWO_PI), 160f, def.radius)
+        when (e.elite[j]) {
+            Elite.SPLITTING -> {
+                val start = w.rng.range(0f, TWO_PI)
+                for (k in 0 until 3) {
+                    val a = start + k * TWO_PI / 3f
+                    val c = w.spawnEnemy(Bestiary.PIP, x + cos(a) * def.radius * 0.5f, y + sin(a) * def.radius * 0.5f)
+                    if (c >= 0) {
+                        e.kx[c] = cos(a) * 220f
+                        e.ky[c] = sin(a) * 220f
+                    }
+                }
+            }
+            Elite.BURSTING -> ring(x, y, 8, w.rng.range(0f, TWO_PI), 160f, def.radius)
+        }
     }
 
     private fun chase(i: Int, target: Int, speed: Float) {

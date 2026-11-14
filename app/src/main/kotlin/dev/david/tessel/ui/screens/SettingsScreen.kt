@@ -115,6 +115,10 @@ fun SettingsScreen(
                     )
                 }
 
+                Group("Sound") {
+                    ToggleRow("Sound effects", settings.sound, { v -> onChange { it.copy(sound = v) } }, detail = "Short synthesised sounds for shots, hits, coins and bosses.")
+                }
+
                 Group("Vibration") {
                     ToggleRow("Vibration", settings.vibration, { v -> onChange { it.copy(vibration = v) } })
                     Divider()
@@ -171,7 +175,7 @@ fun SettingsScreen(
                 Group(
                     "Credits",
                     footer = "Built with Android, Jetpack Compose (Apache License 2.0) and Google's Nearby Connections for finding nearby phones. " +
-                        "Every enemy, boss, shape and icon in the game is original and drawn in code. There is no sound.",
+                        "Every enemy, boss, shape and icon in the game is original and drawn in code.",
                 ) {
                     Column(Modifier.padding(horizontal = Space.x4, vertical = Space.x3), verticalArrangement = Arrangement.spacedBy(Space.x1)) {
                         Text("Tessel", Type.headline, c.ink)

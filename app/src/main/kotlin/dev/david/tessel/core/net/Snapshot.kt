@@ -59,6 +59,10 @@ class Snapshot {
     val kills = IntArray(MAX_PLAYERS)
     val points = IntArray(MAX_PLAYERS)
 
+    /** Perks taken, as a mask, and seconds left of a surge. */
+    val perks = IntArray(MAX_PLAYERS)
+    val surge = IntArray(MAX_PLAYERS)
+
     /** A [dev.david.tessel.core.sim.Cause] code, or -1 while standing. */
     val killedBy = IntArray(MAX_PLAYERS)
 
@@ -83,6 +87,7 @@ class Snapshot {
     var enemyCount = 0
     val enemyId = IntArray(MAX_ENEMIES)
     val enemyType = IntArray(MAX_ENEMIES)
+    val enemyElite = IntArray(MAX_ENEMIES)
     val enemyX = FloatArray(MAX_ENEMIES)
     val enemyY = FloatArray(MAX_ENEMIES)
     val enemyFlash = BooleanArray(MAX_ENEMIES)
@@ -119,6 +124,10 @@ class Snapshot {
     val shopPrice = IntArray(SHOP_SLOTS)
     val shopMaxed = BooleanArray(SHOP_SLOTS)
     val shopAffordable = BooleanArray(SHOP_SLOTS)
+    val shopRare = BooleanArray(SHOP_SLOTS)
+
+    /** Perk ids on offer to the receiving player, -1 for none. */
+    val perkOffer = IntArray(3) { -1 }
     var healPrice = 0
     var healsLeft = 0
     var canHeal = false
