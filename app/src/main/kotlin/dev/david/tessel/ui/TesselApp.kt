@@ -183,7 +183,24 @@ fun TesselApp(
             }
         }
 
-        // Play with runs waiting asks first: a new one, or one of the saved ones.
+        AnimatedVisibility(
+            visible = mode == Mode.HOME && !settingsOpen && !lobbyOpen && !statsOpen,
+            enter = fadeIn(Springs.ui()),
+            exit = fadeOut(Springs.ui()),
+        ) {
+            HomeScreen(
+                settings = settings,
+                ledger = ledger,
+                onPlay = { if (savedRuns.isEmpty()) game.startRun(settings.difficulty) else playOpen = true },
+                onTogether = { lobbyOpen = true },
+                onStats = { statsOpen = true },
+                onDifficulty = { d -> store.update { it.copy(difficulty = d) } },
+                onSettings = { settingsOpen = true },
+            )
+        }
+
+        // Play with runs waiting asks first: a new one, or one of the saved ones. Drawn after the home
+        // screen, or that would cover it.
         Sheet(visible = playOpen && mode == Mode.HOME && !settingsOpen && !lobbyOpen && !statsOpen, onDismiss = { playOpen = false }) {
             PlayPanel(
                 saves = savedRuns,
@@ -199,22 +216,6 @@ fun TesselApp(
                     game.continueRun(slot)
                 },
                 onDelete = game::discardSave,
-            )
-        }
-
-        AnimatedVisibility(
-            visible = mode == Mode.HOME && !settingsOpen && !lobbyOpen && !statsOpen,
-            enter = fadeIn(Springs.ui()),
-            exit = fadeOut(Springs.ui()),
-        ) {
-            HomeScreen(
-                settings = settings,
-                ledger = ledger,
-                onPlay = { if (savedRuns.isEmpty()) game.startRun(settings.difficulty) else playOpen = true },
-                onTogether = { lobbyOpen = true },
-                onStats = { statsOpen = true },
-                onDifficulty = { d -> store.update { it.copy(difficulty = d) } },
-                onSettings = { settingsOpen = true },
             )
         }
 
