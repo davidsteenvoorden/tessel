@@ -33,6 +33,30 @@ class TextBuf(capacity: Int = 96) {
         return this
     }
 
+    /** Thousands set apart by commas, like 12,408. */
+    fun putGrouped(value: Int): TextBuf {
+        if (value < 0) {
+            put('-')
+            return putGrouped(-value)
+        }
+        var divisor = 1
+        while (value / divisor >= 10) divisor *= 10
+        var digits = 0
+        var d = divisor
+        while (d > 0) {
+            digits++
+            d /= 10
+        }
+        var v = value
+        while (divisor > 0) {
+            put('0' + v / divisor % 10)
+            digits--
+            if (digits > 0 && digits % 3 == 0) put(',')
+            divisor /= 10
+        }
+        return this
+    }
+
     /** One decimal place, rounded. */
     fun putTenths(value: Float): TextBuf {
         val tenths = Math.round(value * 10f)

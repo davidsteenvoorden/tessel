@@ -29,9 +29,17 @@ import dev.david.tessel.ui.theme.Type
 import java.util.Locale
 
 /** One line of the statistics: its label, how to read it off a player, and whether the most is worth pointing out. */
-private class Line(val label: String, val crown: Boolean, val coopOnly: Boolean = false, val value: (PlayerStats) -> Int)
+private class Line(
+    val label: String,
+    val crown: Boolean,
+    val coopOnly: Boolean = false,
+    /** Alone the score is shown elsewhere, so the list leaves it out. */
+    val solo: Boolean = true,
+    val value: (PlayerStats) -> Int,
+)
 
 private val lines = listOf(
+    Line("Score", crown = true, solo = false) { it.score },
     Line("Kills", crown = true) { it.kills },
     Line("Damage", crown = true) { it.damage },
     Line("Shots", crown = false) { it.shots },
@@ -68,16 +76,16 @@ fun RunStats(summary: RunSummary, modifier: Modifier = Modifier, header: Boolean
     }
 }
 
-/** "Stage 7 · 6:42 · 1 boss beaten" */
+/** "Stage 7 · 6:42 · Score 4,210 · 1 boss beaten" */
 private fun headline(s: RunSummary): String {
-    val parts = mutableListOf("Stage ${s.stage}", clock(s.seconds))
+    val parts = mutableListOf("Stage ${s.stage}", clock(s.seconds), "Score " + grouped(s.score))
     if (s.bosses > 0) parts += if (s.bosses == 1) "1 boss beaten" else "${s.bosses} bosses beaten"
     return parts.joinToString("  ·  ")
 }
 
 @Composable
 private fun Solo(p: PlayerStats) {
-    val shown = lines.filter { !it.coopOnly }
+    val shown = lines.filter { !it.coopOnly && it.solo }
     val half = (shown.size + 1) / 2
     Row(horizontalArrangement = Arrangement.spacedBy(Space.x6)) {
         for (column in listOf(shown.take(half), shown.drop(half))) {
@@ -146,6 +154,9 @@ private fun Table(team: List<PlayerStats>) = BoxWithConstraints {
     }
     }
 }
+
+/** 12,408, always in full. */
+internal fun grouped(v: Int): String = String.format(Locale.US, "%,d", v)
 
 /** 8,412 up to five digits, then 18.2k and 1.2M, so a column never grows past its width. */
 internal fun figure(v: Int): String = when {

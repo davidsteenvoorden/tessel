@@ -27,9 +27,9 @@ import dev.david.tessel.ui.theme.Type
 private enum class Asking { NOTHING, SAVE, LEAVE }
 
 /**
- * The pause menu: what to do on the left, the run so far on the right. In
- * co-op, Multiplayer Pause saves the game for everyone so it can carry on
- * another time. Saving and leaving both end the session, so each asks once
+ * The pause menu: what to do on the left, the run so far on the right. Alone,
+ * Save and Quit keeps the run for another day; in co-op, Multiplayer Pause
+ * does it for everyone. Saving and leaving both end the run, so each asks once
  * more, in place, before it happens.
  */
 @Composable
@@ -59,16 +59,14 @@ fun PausePanel(
                         SecondaryButton("Settings", onSettings, Modifier.weight(1f))
                     }
                     Spacer(Modifier.height(Space.x3))
-                    if (coop) {
-                        SecondaryButton("Multiplayer Pause", { asking = Asking.SAVE }, Modifier.fillMaxWidth())
-                        Spacer(Modifier.height(Space.x3))
-                    }
+                    SecondaryButton(if (coop) "Multiplayer Pause" else "Save and Quit", { asking = Asking.SAVE }, Modifier.fillMaxWidth())
+                    Spacer(Modifier.height(Space.x3))
                     SecondaryButton(if (coop) "Leave Game" else "Leave Run", { asking = Asking.LEAVE }, Modifier.fillMaxWidth(), tint = c.danger)
                 }
                 Asking.SAVE -> Confirm(
-                    question = "Save and stop for everyone?",
+                    question = if (coop) "Save and stop for everyone?" else "Save this run and quit?",
                     detail = stats?.let { picksUp(it.stage) } ?: "",
-                    action = "Save and Stop",
+                    action = if (coop) "Save and Stop" else "Save and Quit",
                     danger = false,
                     onCancel = { asking = Asking.NOTHING },
                     onConfirm = onSave,
@@ -80,7 +78,7 @@ fun PausePanel(
                         else -> "Leave this game?"
                     },
                     detail = when {
-                        !coop -> ""
+                        !coop -> "The run is not kept. Save and Quit keeps it for later."
                         host -> "The game ends for everyone and is not saved. Multiplayer Pause keeps it."
                         else -> "The others carry on without you."
                     },

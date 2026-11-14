@@ -1,6 +1,8 @@
 package dev.david.tessel.platform.game
 
 import dev.david.tessel.core.content.Difficulty
+import dev.david.tessel.core.content.Scoring
+import dev.david.tessel.core.sim.Cause
 
 /** What the screen is doing, as the menus see it. */
 enum class Mode { HOME, PLAYING, PAUSED, SHOP, OVER }
@@ -50,9 +52,10 @@ class PlayerStats(
     val downed: Int,
     val revives: Int,
     val upgrades: Int,
+    val score: Int = 0,
 )
 
-/** A run so far, or as it ended. [kills] and [coins] are this phone's player's; [team] has everyone. */
+/** A run so far, or as it ended. [kills], [coins] and [score] are this phone's player's; [team] has everyone. */
 class RunSummary(
     val seconds: Int,
     val stage: Int,
@@ -62,4 +65,15 @@ class RunSummary(
     val players: Int = 1,
     val bosses: Int = 0,
     val team: List<PlayerStats> = emptyList(),
-)
+    /** This phone's player's score, and where it came from. */
+    val score: Int = 0,
+    val breakdown: Scoring.Breakdown? = null,
+    /** A [Cause] code: what took this phone's player's last health. -1 while the run goes on. */
+    val killedBy: Int = Cause.NONE,
+    /** The best solo score on this difficulty so far. */
+    val newBest: Boolean = false,
+) {
+    val you get() = team.firstOrNull { it.you }
+
+    fun withBest(best: Boolean) = RunSummary(seconds, stage, kills, coins, difficulty, players, bosses, team, score, breakdown, killedBy, best)
+}

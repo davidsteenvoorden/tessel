@@ -14,6 +14,12 @@ Stage 5 brings the first boss, and another follows every five stages. After the 
 
 Pausing shows the run so far beside the menu: kills, damage, shots, coins, hits taken and upgrades. In a team it is a table with a column per player, and whoever leads a row that is worth winning stands out. The same numbers come up when the run ends.
 
+A clock at the top of the screen shows how long the run has lasted, and your score sits under it. The score counts time alive, stages cleared, bosses beaten, upgrades bought, revives and kills, with bigger enemies worth more, and the difficulty multiplies the lot: Easy by 0.6, Normal by 1, Hard by 1.5 and Impossible by 2.2. When you go down, the last screen shows the enemy that did it, the score and where it came from, and the run in numbers.
+
+Long runs do not have to be played in one go. Pause and pick Save and Quit, and the run waits for you at the shop before the stage you were on. A run also saves itself at every shop, so closing the app or a flat battery costs at most one stage. Play shows your saved runs (up to five) beside New Run; a run you finish or leave is not kept.
+
+The Statistics page on the home screen has three tabs: an overview with your best score on each difficulty and your totals, a list of past runs, and a logbook of every enemy and boss. Enemies show as a grey outline until you meet them; after that the logbook counts how many you have beaten and how often each one has beaten you.
+
 There are four difficulties. Easy is for your first runs: slower and softer enemies, slower shots, ten health where Normal gives eight, more coins, and bosses with less than half their usual health. Normal is a fair fight. Hard and Impossible take all of that the other way.
 
 ![The Gyre, the boss at stage 20](docs/boss.png)
@@ -65,4 +71,4 @@ You need a JDK (17 or newer) and the Android SDK with platform 37.
 
 ## Known limits
 
-Co-op has been played on two phones (a Galaxy A71 and an A13), and the in-app updater has updated both. Games with more than two phones, saving a co-op game, the NFC tap and controllers have been tested in code but not yet on real hardware. There is no sound yet, only vibration. The pictures above were drawn on a computer by the game's own rendering code at the A71's resolution, not captured from a phone.
+Co-op has been played on two phones (a Galaxy A71 and an A13), and the in-app updater has updated both. Games with more than two phones, saving a game, the statistics page, the NFC tap and controllers have been tested in code but not yet on real hardware. There is no sound yet, only vibration. The pictures above were drawn on a computer by the game's own rendering code at the A71's resolution, not captured from a phone.

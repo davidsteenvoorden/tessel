@@ -3,6 +3,7 @@ package dev.david.tessel.core.sim
 import dev.david.tessel.core.content.Balance
 import dev.david.tessel.core.content.Bestiary
 import dev.david.tessel.core.content.Difficulty
+import dev.david.tessel.core.content.Scoring
 import dev.david.tessel.core.rng.Rng
 import kotlin.math.PI
 import kotlin.math.atan2
@@ -214,7 +215,10 @@ class World(seed: Long = 1L) {
         phase = Phase.FIGHT
         // Anyone who went down comes back for the new stage at half health.
         for (p in 0 until playerCount) {
-            if (players.present[p] && players.hp[p] == 0) players.hp[p] = max(1, players.maxHp[p] / 2)
+            if (players.present[p] && players.hp[p] == 0) {
+                players.hp[p] = max(1, players.maxHp[p] / 2)
+                players.killedBy[p] = Cause.NONE
+            }
         }
         players.remember()
         director.startStage()
@@ -236,6 +240,7 @@ class World(seed: Long = 1L) {
             cp.coins[p] = pl.coins[p]
             cp.earned[p] = pl.earned[p]
             cp.kills[p] = pl.kills[p]
+            cp.points[p] = pl.points[p]
             cp.fired[p] = pl.fired[p]
             cp.dealt[p] = pl.dealt[p]
             cp.taken[p] = pl.taken[p]
@@ -261,6 +266,7 @@ class World(seed: Long = 1L) {
             pl.coins[p] = cp.coins[p]
             pl.earned[p] = cp.earned[p]
             pl.kills[p] = cp.kills[p]
+            pl.points[p] = cp.points[p]
             pl.fired[p] = cp.fired[p]
             pl.dealt[p] = cp.dealt[p]
             pl.taken[p] = cp.taken[p]
@@ -335,13 +341,15 @@ class World(seed: Long = 1L) {
         return i
     }
 
-    /** An enemy shot leaving [x], [y] at [angle]. */
-    internal fun spawnHostile(x: Float, y: Float, angle: Float, speed: Float) {
+    /** An enemy shot leaving [x], [y] at [angle], fired by an enemy of type [source]. */
+    internal fun spawnHostile(x: Float, y: Float, angle: Float, speed: Float, source: Int = -1) {
         val s = speed * hostileSpeedScale()
         val id = nextId++
         val vx = cos(angle) * s
         val vy = sin(angle) * s
-        if (hostile.add(id, x, y, vx, vy, HOSTILE_TICKS, 1f, Balance.HOSTILE_RADIUS, 0, -1) < 0) return
+        val i = hostile.add(id, x, y, vx, vy, HOSTILE_TICKS, 1f, Balance.HOSTILE_RADIUS, 0, -1)
+        if (i < 0) return
+        hostile.source[i] = source
         // Shots fly straight, so other phones only need to hear about them once. The tick rides in angle.
         events.add(Events.HOSTILE_SPAWN, id, x, y, vx, vy, tick.toFloat())
     }
@@ -377,19 +385,49 @@ class World(seed: Long = 1L) {
     /** Player [p]'s phone saw them get hit, by the enemy shot whose id ends in [shot16], or by touch when it is -1. */
     fun remoteHurt(p: Int, shot16: Int) {
         if (phase != Phase.FIGHT && phase != Phase.CLEAR) return
+        var cause = Cause.NONE
         if (shot16 >= 0) {
             val h = hostile
             for (i in 0 until h.count) {
                 if (h.id[i] and 0xFFFF != shot16 || h.life[i] <= 0) continue
                 h.life[i] = 0
                 events.add(Events.HOSTILE_GONE, h.id[i])
+                cause = Cause.shot(h.source[i])
                 break
             }
         }
-        if (players.alive(p) && players.invuln[p] == 0) hurtPlayer(p)
+        // Their phone saw the hit, the host may already have lost the shot or the body: blame what is nearest.
+        if (cause == Cause.NONE) cause = Cause.touch(nearestEnemyType(players.x[p], players.y[p]))
+        if (players.alive(p) && players.invuln[p] == 0) hurtPlayer(p, cause)
     }
 
     fun stageProgress() = min(stageTicks / STAGE_TICKS.toFloat(), 1f)
+
+    /** Stages finished so far: the one in the shop counts, the one being fought does not. */
+    val stagesCleared get() = if (phase == Phase.SHOP) stage else stage - 1
+
+    /** Player [p]'s score as the run stands. */
+    fun score(p: Int) = Scoring.total(
+        difficulty, tick / TICK_HZ, stagesCleared, bossesDown, players.points[p], players.bought(p), players.revived[p],
+    )
+
+    /** Type of the enemy closest to a point, or -1 with none about. */
+    private fun nearestEnemyType(x: Float, y: Float): Int {
+        val e = enemies
+        var best = -1
+        var bestD = Float.MAX_VALUE
+        for (j in 0 until e.count) {
+            if (e.hp[j] <= 0f) continue
+            val dx = e.x[j] - x
+            val dy = e.y[j] - y
+            val d = dx * dx + dy * dy
+            if (d < bestD) {
+                bestD = d
+                best = e.type[j]
+            }
+        }
+        return best
+    }
 
     fun enemySpeedScale(): Float {
         val byStage = min(Balance.ENEMY_SPEED_START + Balance.ENEMY_SPEED_PER_STAGE * (stage - 1), Balance.ENEMY_SPEED_MAX)
@@ -653,6 +691,7 @@ class World(seed: Long = 1L) {
         val def = Bestiary.of(e.type[j])
         events.add(Events.ENEMY_KILLED, e.type[j], e.x[j], e.y[j], ux, uy, e.angle[j], e.id[j])
         players.kills[owner]++
+        players.points[owner] += Scoring.kill(e.type[j])
         val drops = if (def.coinChance >= 1f || rng.nextFloat() < def.coinChance) def.coins else 0
         val fling = if (def.boss) 260f else 150f
         repeat(drops) {
@@ -698,7 +737,7 @@ class World(seed: Long = 1L) {
                 if (dx * dx + dy * dy < reach * reach) {
                     h.life[i] = 0
                     events.add(Events.HOSTILE_GONE, h.id[i])
-                    hurtPlayer(p)
+                    hurtPlayer(p, Cause.shot(h.source[i]))
                     break
                 }
             }
@@ -714,8 +753,12 @@ class World(seed: Long = 1L) {
             val px = pl.x[p]
             val py = pl.y[p]
             var touched = false
+            var touchType = -1
             forEnemiesNear(px, py, r + Bestiary.maxRegularRadius) { j ->
-                if (e.hp[j] > 0f && pushOff(j, px, py, r)) touched = true
+                if (e.hp[j] > 0f && pushOff(j, px, py, r)) {
+                    touched = true
+                    touchType = e.type[j]
+                }
             }
             val b = boss
             if (b >= 0 && e.hp[b] > 0f) {
@@ -724,6 +767,7 @@ class World(seed: Long = 1L) {
                 val dy = e.y[b] - py
                 if (dx * dx + dy * dy < reach * reach) {
                     touched = true
+                    touchType = e.type[b]
                     // The boss does not budge; the player is pushed out instead.
                     val d = sqrt(dx * dx + dy * dy).coerceAtLeast(0.001f)
                     pl.x[p] = (e.x[b] - dx / d * reach).coerceIn(r, ARENA_W - r)
@@ -731,7 +775,7 @@ class World(seed: Long = 1L) {
                 }
             }
             // Enemies still make way for a remote player, but only their own phone says when it hurts.
-            if (touched && pl.invuln[p] == 0 && !remote[p]) hurtPlayer(p)
+            if (touched && pl.invuln[p] == 0 && !remote[p]) hurtPlayer(p, Cause.touch(touchType))
         }
     }
 
@@ -751,7 +795,7 @@ class World(seed: Long = 1L) {
         return true
     }
 
-    private fun hurtPlayer(p: Int) {
+    private fun hurtPlayer(p: Int, cause: Int) {
         val e = enemies
         val pl = players
         val px = pl.x[p]
@@ -777,6 +821,7 @@ class World(seed: Long = 1L) {
 
         if (pl.hp[p] <= 0) {
             pl.hp[p] = 0
+            pl.killedBy[p] = cause
             pl.downs[p]++
             events.add(Events.PLAYER_DOWN, p, px, py)
         }
@@ -809,6 +854,7 @@ class World(seed: Long = 1L) {
             if (pl.revive[p] >= REVIVE_TICKS) {
                 pl.revive[p] = 0
                 pl.hp[p] = max(1, pl.maxHp[p] / 2)
+                pl.killedBy[p] = Cause.NONE
                 pl.invuln[p] = INVULN_TICKS * 2
                 // Everyone who stood close shares the credit.
                 for (q in 0 until playerCount) {

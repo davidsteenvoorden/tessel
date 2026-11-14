@@ -455,7 +455,23 @@ class CoopLoopTest {
             // Up to a snapshot behind the host.
             assertEquals(world.players.fired[p].toFloat(), s.fired[p].toFloat(), 40f)
             assertEquals(world.players.bought(p), s.bought[p])
+            assertEquals(world.players.points[p], s.points[p])
         }
+    }
+
+    @Test
+    fun whatDownedAPlayerReachesTheirPhone() {
+        world.spawning = false
+        run(0.5f)
+        world.players.hp[CLIENT] = 1
+        world.players.invuln[CLIENT] = 0
+        world.spawnEnemy(dev.david.tessel.core.content.Bestiary.SLAB, world.players.x[CLIENT], world.players.y[CLIENT])
+        world.remoteHurt(CLIENT, -1)
+        run(0.5f)
+        val s = client.latest!!
+        val cause = s.killedBy[CLIENT]
+        assertEquals(dev.david.tessel.core.content.Bestiary.SLAB, dev.david.tessel.core.sim.Cause.type(cause))
+        assertEquals(-1, s.killedBy[HOST_PLAYER])
     }
 
     @Test

@@ -35,7 +35,9 @@ import dev.david.tessel.platform.game.RunSummary
 import dev.david.tessel.platform.game.ShopView
 import dev.david.tessel.platform.net.CoopLobby
 import dev.david.tessel.platform.net.LobbyState
+import dev.david.tessel.platform.store.LedgerStore
 import dev.david.tessel.platform.store.SettingsStore
+import dev.david.tessel.platform.store.SoloSaves
 import dev.david.tessel.platform.update.Updater
 import dev.david.tessel.ui.components.PauseButton
 import dev.david.tessel.ui.components.PrimaryButton
@@ -46,9 +48,11 @@ import dev.david.tessel.ui.screens.HomeScreen
 import dev.david.tessel.ui.screens.LobbyScreen
 import dev.david.tessel.ui.screens.NoticeCard
 import dev.david.tessel.ui.screens.PausePanel
+import dev.david.tessel.ui.screens.PlayPanel
 import dev.david.tessel.ui.screens.RunOverCard
 import dev.david.tessel.ui.screens.SettingsScreen
 import dev.david.tessel.ui.screens.ShopPanel
+import dev.david.tessel.ui.screens.StatsScreen
 import dev.david.tessel.ui.theme.Space
 import dev.david.tessel.ui.theme.Springs
 import dev.david.tessel.ui.theme.Theme
@@ -59,10 +63,19 @@ import dev.david.tessel.ui.theme.Type
  * end card. The game view sits underneath and gets every touch these leave alone.
  */
 @Composable
-fun TesselApp(game: GameSurfaceView, lobby: CoopLobby, store: SettingsStore, updater: Updater, onStart: (() -> Unit)?) {
+fun TesselApp(
+    game: GameSurfaceView,
+    lobby: CoopLobby,
+    store: SettingsStore,
+    ledgerStore: LedgerStore,
+    soloSaves: SoloSaves,
+    updater: Updater,
+    onStart: (() -> Unit)?,
+) {
     val c = Theme.colors
     val settings by store.settings.collectAsState()
-    val records by store.records.collectAsState()
+    val ledger by ledgerStore.state.collectAsState()
+    val savedRuns by soloSaves.saves.collectAsState()
     val mode by game.mode.collectAsState()
     val role by game.role.collectAsState()
     val shop by game.shop.collectAsState()
@@ -75,19 +88,15 @@ fun TesselApp(game: GameSurfaceView, lobby: CoopLobby, store: SettingsStore, upd
 
     var settingsOpen by rememberSaveable { mutableStateOf(false) }
     var lobbyOpen by rememberSaveable { mutableStateOf(false) }
-    var newBest by remember { mutableStateOf(false) }
+    var statsOpen by rememberSaveable { mutableStateOf(false) }
+    var playOpen by remember { mutableStateOf(false) }
     // Kept after the game clears them, so a closing panel still has something to show.
     var lastShop by remember { mutableStateOf<ShopView?>(null) }
     var lastSummary by remember { mutableStateOf<RunSummary?>(null) }
 
     LaunchedEffect(settings) { game.applySettings(settings) }
     LaunchedEffect(shop) { shop?.let { lastShop = it } }
-    LaunchedEffect(summary) {
-        val run = summary ?: return@LaunchedEffect
-        lastSummary = run
-        // Only solo runs count toward the best on the home screen.
-        newBest = !coop && store.record(run)
-    }
+    LaunchedEffect(summary) { summary?.let { lastSummary = it } }
     LaunchedEffect(Unit) { onStart?.invoke() }
     // Once the host presses Start, every phone leaves the lobby for the arena.
     // A tap from a host's phone opens the lobby here and joins on its own.
@@ -130,7 +139,7 @@ fun TesselApp(game: GameSurfaceView, lobby: CoopLobby, store: SettingsStore, upd
                 onResume = game::resume,
                 onSettings = { settingsOpen = true },
                 onSave = game::saveForLater,
-                onLeave = { if (coop) abandonCoop() else game.leaveRun() },
+                onLeave = { if (coop) abandonCoop() else game.abandonRun() },
             )
         }
 
@@ -143,7 +152,6 @@ fun TesselApp(game: GameSurfaceView, lobby: CoopLobby, store: SettingsStore, upd
         RunOverCard(
             visible = mode == Mode.OVER,
             summary = summary ?: lastSummary,
-            newBest = newBest,
             onAgain = { game.playAgain(settings.difficulty) },
             onHome = { if (coop) leaveCoop() else game.leaveRun() },
         )
@@ -175,16 +183,36 @@ fun TesselApp(game: GameSurfaceView, lobby: CoopLobby, store: SettingsStore, upd
             }
         }
 
+        // Play with runs waiting asks first: a new one, or one of the saved ones.
+        Sheet(visible = playOpen && mode == Mode.HOME && !settingsOpen && !lobbyOpen && !statsOpen, onDismiss = { playOpen = false }) {
+            PlayPanel(
+                saves = savedRuns,
+                difficulty = settings.difficulty,
+                now = System.currentTimeMillis(),
+                onDifficulty = { d -> store.update { it.copy(difficulty = d) } },
+                onNew = {
+                    playOpen = false
+                    game.startRun(settings.difficulty)
+                },
+                onContinue = { slot ->
+                    playOpen = false
+                    game.continueRun(slot)
+                },
+                onDelete = game::discardSave,
+            )
+        }
+
         AnimatedVisibility(
-            visible = mode == Mode.HOME && !settingsOpen && !lobbyOpen,
+            visible = mode == Mode.HOME && !settingsOpen && !lobbyOpen && !statsOpen,
             enter = fadeIn(Springs.ui()),
             exit = fadeOut(Springs.ui()),
         ) {
             HomeScreen(
                 settings = settings,
-                records = records,
-                onPlay = { game.startRun(settings.difficulty) },
+                ledger = ledger,
+                onPlay = { if (savedRuns.isEmpty()) game.startRun(settings.difficulty) else playOpen = true },
                 onTogether = { lobbyOpen = true },
+                onStats = { statsOpen = true },
                 onDifficulty = { d -> store.update { it.copy(difficulty = d) } },
                 onSettings = { settingsOpen = true },
             )
@@ -210,6 +238,19 @@ fun TesselApp(game: GameSurfaceView, lobby: CoopLobby, store: SettingsStore, upd
         }
 
         AnimatedVisibility(
+            visible = statsOpen && mode == Mode.HOME,
+            enter = slideInHorizontally(Springs.ui()) { it } + fadeIn(Springs.ui()),
+            exit = slideOutHorizontally(Springs.ui()) { it } + fadeOut(Springs.ui()),
+        ) {
+            StatsScreen(
+                ledger = ledger,
+                now = System.currentTimeMillis(),
+                onErase = ledgerStore::erase,
+                onBack = { statsOpen = false },
+            )
+        }
+
+        AnimatedVisibility(
             visible = settingsOpen,
             enter = slideInHorizontally(Springs.ui()) { it } + fadeIn(Springs.ui()),
             exit = slideOutHorizontally(Springs.ui()) { it } + fadeOut(Springs.ui()),
@@ -230,9 +271,11 @@ fun TesselApp(game: GameSurfaceView, lobby: CoopLobby, store: SettingsStore, upd
         }
     }
 
-    BackHandler(enabled = settingsOpen || lobbyOpen || mode != Mode.HOME) {
+    BackHandler(enabled = settingsOpen || lobbyOpen || statsOpen || playOpen || mode != Mode.HOME) {
         when {
             settingsOpen -> settingsOpen = false
+            statsOpen -> statsOpen = false
+            playOpen -> playOpen = false
             lobbyOpen -> {
                 lobby.leave()
                 lobbyOpen = false

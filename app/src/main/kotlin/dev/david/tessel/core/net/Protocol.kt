@@ -108,6 +108,8 @@ object Protocol {
             buf.put(pl.downs[p].coerceAtMost(255).toByte())
             buf.put(pl.revived[p].coerceAtMost(255).toByte())
             buf.putShort(pl.bought(p).toShort())
+            buf.putInt(pl.points[p])
+            buf.put(pl.killedBy[p].toByte())
         }
 
         val e = w.enemies
@@ -229,6 +231,8 @@ object Protocol {
             s.downs[p] = buf.get().toInt() and 0xFF
             s.revived[p] = buf.get().toInt() and 0xFF
             s.bought[p] = buf.short.toInt()
+            s.points[p] = buf.int
+            s.killedBy[p] = buf.get().toInt()
         }
 
         s.enemyCount = buf.short.toInt().coerceIn(0, MAX_ENEMIES)

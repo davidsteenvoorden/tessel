@@ -72,6 +72,9 @@ internal class Brains(private val w: World) {
         }
     }
 
+    /** Type of the enemy whose turn it is, so its shots carry its name. */
+    private var shooter = -1
+
     fun think() {
         val e = w.enemies
         escorts = 0
@@ -84,6 +87,7 @@ internal class Brains(private val w: World) {
         for (i in 0 until n) {
             if (e.hp[i] <= 0f) continue
             val def = Bestiary.of(e.type[i])
+            shooter = e.type[i]
             if (e.flash[i] > 0) e.flash[i]--
             val target = w.nearestPlayer(e.x[i], e.y[i])
             dvx = 0f
@@ -118,6 +122,7 @@ internal class Brains(private val w: World) {
     fun died(j: Int) {
         val e = w.enemies
         val def = Bestiary.of(e.type[j])
+        shooter = e.type[j]
         val x = e.x[j]
         val y = e.y[j]
         if (def.child >= 0 && def.children > 0 && def.attack != Attack.SPAWN && !def.boss) {
@@ -482,7 +487,7 @@ internal class Brains(private val w: World) {
     }
 
     private fun shoot(x: Float, y: Float, a: Float, speed: Float, r: Float) {
-        w.spawnHostile(x + cos(a) * r * 0.9f, y + sin(a) * r * 0.9f, a, speed)
+        w.spawnHostile(x + cos(a) * r * 0.9f, y + sin(a) * r * 0.9f, a, speed, shooter)
     }
 
     private fun seek(i: Int, tx: Float, ty: Float, speed: Float) {

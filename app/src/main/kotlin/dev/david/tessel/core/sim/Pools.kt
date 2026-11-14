@@ -39,6 +39,12 @@ class PlayerState {
     val earned = IntArray(MAX_PLAYERS)
     val kills = IntArray(MAX_PLAYERS)
 
+    /** Score points from kills; see Scoring. */
+    val points = IntArray(MAX_PLAYERS)
+
+    /** What took the last health, as a [Cause] code; -1 while standing. */
+    val killedBy = IntArray(MAX_PLAYERS) { Cause.NONE }
+
     // For the run's statistics: bullets fired, damage dealt, hits taken, times downed, teammates revived.
     val fired = IntArray(MAX_PLAYERS)
     val dealt = FloatArray(MAX_PLAYERS)
@@ -87,6 +93,8 @@ class PlayerState {
             coins[i] = 0
             earned[i] = 0
             kills[i] = 0
+            points[i] = 0
+            killedBy[i] = Cause.NONE
             fired[i] = 0
             dealt[i] = 0f
             taken[i] = 0
@@ -115,6 +123,9 @@ class BulletPool(private val capacity: Int) {
     val radius = FloatArray(capacity)
     val owner = IntArray(capacity)
 
+    /** For enemy shots: the type of enemy that fired it, or -1. */
+    val source = IntArray(capacity)
+
     /** Enemies it may still pass through. */
     val pierce = IntArray(capacity)
 
@@ -140,6 +151,7 @@ class BulletPool(private val capacity: Int) {
         this.pierce[i] = pierce
         lastHit[i] = -1
         this.owner[i] = owner
+        source[i] = -1
         return i
     }
 
@@ -173,6 +185,7 @@ class BulletPool(private val capacity: Int) {
         pierce[i] = pierce[last]
         lastHit[i] = lastHit[last]
         owner[i] = owner[last]
+        source[i] = source[last]
     }
 }
 

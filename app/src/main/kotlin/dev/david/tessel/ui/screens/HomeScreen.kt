@@ -19,7 +19,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import dev.david.tessel.core.content.Difficulty
-import dev.david.tessel.platform.store.Records
+import dev.david.tessel.core.stats.Ledger
 import dev.david.tessel.platform.store.Settings
 import dev.david.tessel.ui.components.Divider
 import dev.david.tessel.ui.components.Group
@@ -35,9 +35,10 @@ import dev.david.tessel.ui.theme.Type
 @Composable
 fun HomeScreen(
     settings: Settings,
-    records: Records,
+    ledger: Ledger,
     onPlay: () -> Unit,
     onTogether: () -> Unit,
+    onStats: () -> Unit,
     onDifficulty: (Difficulty) -> Unit,
     onSettings: () -> Unit,
 ) {
@@ -55,11 +56,11 @@ fun HomeScreen(
             Spacer(Modifier.height(Space.x5))
             Text("Tessel", Type.display, c.ink)
             Spacer(Modifier.height(Space.x2))
-            val best = records.of(settings.difficulty)
+            val best = ledger.bestOn(settings.difficulty)
             val line = if (best == null) {
                 "No ${settings.difficulty.label} runs yet"
             } else {
-                "Best on ${settings.difficulty.label}: Stage ${best.stage} in ${clock(best.seconds)}"
+                "Best on ${settings.difficulty.label}: ${grouped(best.score)}  ·  Stage ${best.stage} in ${clock(best.seconds)}"
             }
             Text(line, Type.subhead.merge(Type.numbers), c.ink2)
         }
@@ -79,6 +80,8 @@ fun HomeScreen(
             Spacer(Modifier.height(Space.x4))
             Group(title = null) {
                 NavRow("Play Together", onClick = onTogether, detail = "Up to eight phones, one team.")
+                Divider()
+                NavRow("Statistics", onClick = onStats, detail = "Past runs, totals and the logbook.")
                 Divider()
                 NavRow("Settings", onClick = onSettings)
             }

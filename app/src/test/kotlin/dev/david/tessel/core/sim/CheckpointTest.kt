@@ -93,4 +93,36 @@ class CheckpointTest {
         assertNull(Checkpoint.read(byteArrayOf(1, 2, 3, 4)))
         assertNull(Checkpoint.read(inTheShop(2).capture().write().copyOf(24)))
     }
+
+    @Test
+    fun killPointsAndTheScoreComeBack() {
+        val w = inTheShop(1)
+        w.players.points[0] = 777
+        w.players.levels[0][Upgrades.DAMAGE] = 2
+        val cp = Checkpoint.read(w.capture().write())!!
+        assertEquals(777, cp.points[0])
+        assertEquals(w.score(0), cp.score(0))
+        val r = World(seed = 1)
+        r.restore(cp, seed = 3) { true }
+        assertEquals(777, r.players.points[0])
+        assertEquals(w.score(0), r.score(0))
+    }
+
+    @Test
+    fun aSaveFromBeforeTheScoreStillLoads() {
+        val w = inTheShop(1)
+        w.players.kills[0] = 12
+        w.players.points[0] = 500
+        val now = w.capture().write()
+        // Version 1 had no kill points: cut the four bytes after the kills and say so in the header.
+        val header = 16
+        val points = header + 1 + 8 + 1 + 0 + 2 + 2 + 4 + 4 + 4
+        val old = now.copyOfRange(0, points) + now.copyOfRange(points + 4, now.size)
+        old[2] = 1
+        val cp = Checkpoint.read(old)
+        assertNotNull(cp)
+        assertEquals(12, cp!!.kills[0])
+        assertEquals(0, cp.points[0])
+        assertEquals(w.stage, cp.stage)
+    }
 }

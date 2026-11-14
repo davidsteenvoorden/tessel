@@ -54,6 +54,10 @@ class Snapshot {
     val coins = IntArray(MAX_PLAYERS)
     val earned = IntArray(MAX_PLAYERS)
     val kills = IntArray(MAX_PLAYERS)
+    val points = IntArray(MAX_PLAYERS)
+
+    /** A [dev.david.tessel.core.sim.Cause] code, or -1 while standing. */
+    val killedBy = IntArray(MAX_PLAYERS)
 
     // The run's statistics.
     val fired = IntArray(MAX_PLAYERS)

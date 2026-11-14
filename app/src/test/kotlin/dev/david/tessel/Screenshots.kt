@@ -37,7 +37,14 @@ import dev.david.tessel.platform.game.Shards
 import dev.david.tessel.platform.game.Viewport
 import dev.david.tessel.platform.input.StickView
 import dev.david.tessel.ui.components.Sheet
-import dev.david.tessel.platform.store.Records
+import dev.david.tessel.core.stats.Ledger
+import dev.david.tessel.core.stats.RunEntry
+import dev.david.tessel.core.stats.Tally
+import dev.david.tessel.core.content.Scoring
+import dev.david.tessel.core.sim.Cause
+import dev.david.tessel.platform.store.SoloSave
+import dev.david.tessel.ui.screens.PlayPanel
+import dev.david.tessel.ui.screens.StatsScreen
 import dev.david.tessel.platform.store.Settings
 import dev.david.tessel.platform.update.Updater
 import dev.david.tessel.ui.screens.HomeScreen
@@ -145,6 +152,7 @@ class Screenshots {
             knobY = originY + scene.world.players.aimY[me] * 110f
         }
         scene.renderer.draw(canvas, scene.world, 1f, view, scene.shards, move, aim, me)
+        scene.hud.score(scene.world.score(me))
         scene.hud.draw(canvas, scene.world, palette, 0, 0, 0, me, 0L)
         return bitmap
     }
@@ -236,20 +244,29 @@ class Screenshots {
         save(compose.onRoot().captureToImage().asAndroidBitmap(), "shop.png")
     }
 
-    private fun team(n: Int, stage: Int): RunSummary {
+    private fun team(n: Int, stage: Int, killer: Int = Cause.shot(Bestiary.FANNER)): RunSummary {
         val names = listOf("Galaxy A71", "Sam", "Noor's A13", "Jules", "Ava", "Teo", "Mika", "Lou")
-        val team = List(n) { p ->
+        val seconds = stage * 64 + 13
+        val players = List(n) { p ->
+            val kills = 180 + p * 47 % 120
+            val upgrades = 14 + p % 5
+            val revives = (p * 2 + 1) % 4
+            val points = kills * 7
             PlayerStats(
-                name = names[p], you = p == 1, present = p != 3 || n < 4,
-                kills = 180 + p * 47 % 120, damage = 9_400 + p * 2_731 % 9_000, shots = 2_900 + p * 611 % 1_500,
-                coins = 640 + p * 93 % 300, hitsTaken = 3 + p * 5 % 9, downed = p % 3, revives = (p * 2 + 1) % 4,
-                upgrades = 14 + p % 5,
+                name = names[p], you = p == 1 || n == 1, present = p != 3 || n < 4,
+                kills = kills, damage = 9_400 + p * 2_731 % 9_000, shots = 2_900 + p * 611 % 1_500,
+                coins = 640 + p * 93 % 300, hitsTaken = 3 + p * 5 % 9, downed = p % 3, revives = revives,
+                upgrades = upgrades,
+                score = Scoring.total(Difficulty.NORMAL, seconds, stage - 1, stage / 5, points, upgrades, revives),
             )
         }
-        return RunSummary(seconds = stage * 64 + 13, stage = stage, kills = team[minOf(1, n - 1)].kills, coins = team[minOf(1, n - 1)].coins,
-            difficulty = Difficulty.NORMAL, players = n, bosses = stage / 5, team = if (n == 1) listOf(team[0].let {
-                PlayerStats("You", true, true, it.kills, it.damage, it.shots, it.coins, it.hitsTaken, 0, 0, it.upgrades)
-            }) else team)
+        val you = players.first { it.you }
+        val breakdown = Scoring.breakdown(Difficulty.HARD, seconds, stage - 1, stage / 5, you.kills * 7, you.upgrades, you.revives)
+        return RunSummary(
+            seconds = seconds, stage = stage, kills = you.kills, coins = you.coins, difficulty = Difficulty.HARD,
+            players = n, bosses = stage / 5, team = if (n == 1) listOf(PlayerStats("You", true, true, you.kills, you.damage, you.shots, you.coins, you.hitsTaken, 0, 0, you.upgrades, you.score)) else players,
+            score = breakdown.total, breakdown = breakdown, killedBy = killer, newBest = n == 1,
+        )
     }
 
     @Test
@@ -265,8 +282,8 @@ class Screenshots {
                     when (page) {
                         0 -> Sheet(visible = true, onDismiss = {}) { PausePanel(false, true, team(1, 7), {}, {}, {}, {}) }
                         1, 2 -> Sheet(visible = true, onDismiss = {}) { PausePanel(true, true, team(4, 7), {}, {}, {}, {}) }
-                        3 -> RunOverCard(true, team(1, 9), newBest = true, onAgain = {}, onHome = {})
-                        4 -> RunOverCard(true, team(8, 12), newBest = false, onAgain = {}, onHome = {})
+                        3 -> RunOverCard(true, team(1, 9), onAgain = {}, onHome = {})
+                        4 -> RunOverCard(true, team(8, 12, Cause.touch(Bestiary.SLAB)), onAgain = {}, onHome = {})
                         else -> Box(Modifier.fillMaxSize().padding(48.dp)) {
                             val cp = Checkpoint(Difficulty.HARD, 6, 6 * 3900, 3, true, 1)
                             cp.names[1] = "Sam"
@@ -297,7 +314,7 @@ class Screenshots {
         compose.setContent {
             TesselTheme {
                 if (page == 0) {
-                    HomeScreen(Settings(difficulty = Difficulty.EASY), Records(), {}, {}, {}, {})
+                    HomeScreen(Settings(difficulty = Difficulty.EASY), Ledger(), {}, {}, {}, {}, {})
                 } else {
                     SettingsScreen(Settings(), updater, inRun = false, onChange = {}, onBack = {})
                 }
@@ -311,5 +328,70 @@ class Screenshots {
         compose.mainClock.advanceTimeBy(1000)
         compose.waitForIdle()
         save(compose.onRoot().captureToImage().asAndroidBitmap(), "settings.png", checks)
+    }
+
+    private fun sampleLedger(): Ledger {
+        val l = Ledger()
+        val now = 1_700_000_000_000L
+        val runs = listOf(
+            RunEntry(now - 3_600_000, Difficulty.NORMAL, 9, 612, 4_210, 388, 1_140, 1, 1, Cause.shot(Bestiary.FANNER), false, 5_800, 2_100, 9, 0, 0, 14),
+            RunEntry(now - 90_000_000, Difficulty.HARD, 12, 801, 7_980, 512, 1_620, 2, 1, Cause.touch(Bestiary.SLAB), false, 9_100, 2_900, 12, 0, 0, 19),
+            RunEntry(now - 200_000_000, Difficulty.NORMAL, 4, 140, 520, 61, 190, 0, 3, Cause.NONE, true, 800, 400, 2, 1, 2, 5),
+            RunEntry(now - 400_000_000, Difficulty.EASY, 6, 300, 1_880, 142, 420, 0, 1, Cause.shot(Bestiary.TICK), false, 2_000, 900, 6, 0, 0, 8),
+        )
+        for (r in runs.reversed()) l.record(r)
+        val t = Tally()
+        for (type in listOf(Bestiary.DOT, Bestiary.PIP, Bestiary.SLAB, Bestiary.DRIFTER, Bestiary.TICK, Bestiary.DASHER, Bestiary.HALVER, Bestiary.HALFLING, Bestiary.FANNER, Bestiary.HEXARCH)) {
+            t.see(type, 1 + type / 2)
+            repeat(30 + type * 11) { t.defeat(type, 1 + type / 2) }
+        }
+        t.slain(Bestiary.FANNER, 9)
+        t.slain(Bestiary.SLAB, 12)
+        l.merge(t)
+        return l
+    }
+
+    @Test
+    fun playAndStatistics() {
+        val scene = Scene(players = 1, stage = 4, seed = 404, palette = Palette.Dark, density = density)
+        scene.play(10f)
+        val arena = draw(scene, Palette.Dark)
+        val ledger = sampleLedger()
+        val saves = List(3) { i ->
+            val cp = Checkpoint(Difficulty.entries[i + 1], 3 + i * 4, (3 + i * 4) * 3900, 1, i != 2, i)
+            cp.points[0] = 900 * (i + 1)
+            cp.levels[0][0] = 3 + i
+            SoloSave(i + 1, 1_700_000_000_000L - i * 9_000_000L, cp)
+        }
+        var page by mutableStateOf(0)
+        compose.setContent {
+            TesselTheme {
+                Box(Modifier.fillMaxSize()) {
+                    Image(arena.asImageBitmap(), null, Modifier.fillMaxSize(), contentScale = ContentScale.FillBounds)
+                    if (page == 0) {
+                        Sheet(visible = true, onDismiss = {}) {
+                            PlayPanel(saves, Difficulty.NORMAL, 1_700_000_000_000L, {}, {}, {}, {})
+                        }
+                    } else {
+                        StatsScreen(ledger, 1_700_000_000_000L, {}, {})
+                    }
+                }
+            }
+        }
+        compose.mainClock.advanceTimeBy(1500)
+        compose.waitForIdle()
+        save(compose.onRoot().captureToImage().asAndroidBitmap(), "play-panel.png", checks)
+        page = 1
+        compose.mainClock.advanceTimeBy(500)
+        compose.waitForIdle()
+        save(compose.onRoot().captureToImage().asAndroidBitmap(), "stats-overview.png", checks)
+        compose.onNodeWithText("Runs").performClick()
+        compose.mainClock.advanceTimeBy(800)
+        compose.waitForIdle()
+        save(compose.onRoot().captureToImage().asAndroidBitmap(), "stats-runs.png", checks)
+        compose.onNodeWithText("Logbook").performClick()
+        compose.mainClock.advanceTimeBy(800)
+        compose.waitForIdle()
+        save(compose.onRoot().captureToImage().asAndroidBitmap(), "stats-logbook.png", checks)
     }
 }

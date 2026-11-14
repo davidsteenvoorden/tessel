@@ -1,6 +1,7 @@
 package dev.david.tessel.core.sim
 
 import dev.david.tessel.core.content.Difficulty
+import dev.david.tessel.core.content.Scoring
 import dev.david.tessel.core.content.Upgrades
 import java.nio.BufferUnderflowException
 import java.nio.ByteBuffer
@@ -28,6 +29,7 @@ class Checkpoint(
     val coins = IntArray(MAX_PLAYERS)
     val earned = IntArray(MAX_PLAYERS)
     val kills = IntArray(MAX_PLAYERS)
+    val points = IntArray(MAX_PLAYERS)
     val fired = IntArray(MAX_PLAYERS)
     val dealt = FloatArray(MAX_PLAYERS)
     val taken = IntArray(MAX_PLAYERS)
@@ -38,6 +40,14 @@ class Checkpoint(
     val rerolls = IntArray(MAX_PLAYERS)
     val heals = IntArray(MAX_PLAYERS)
 
+    /** Seconds of play so far. */
+    val seconds: Int get() = tick / TICK_HZ
+
+    /** Player [p]'s score as the run stood when it was saved. */
+    fun score(p: Int = 0) = Scoring.total(
+        difficulty, seconds, if (inShop) stage else 0, bossesDown, points[p], levels[p].sum(), revived[p],
+    )
+
     /** The stage played next when this run carries on. */
     val nextStage: Int get() = if (inShop) stage + 1 else 1
 
@@ -46,7 +56,7 @@ class Checkpoint(
     val names = Array(MAX_PLAYERS) { "" }
 
     fun write(): ByteArray {
-        val buf = ByteBuffer.allocate(64 + players * (120 + Upgrades.count + SHOP_SLOTS)).order(ByteOrder.LITTLE_ENDIAN)
+        val buf = ByteBuffer.allocate(64 + players * (124 + Upgrades.count + SHOP_SLOTS)).order(ByteOrder.LITTLE_ENDIAN)
         buf.put('T'.code.toByte())
         buf.put('C'.code.toByte())
         buf.put(FORMAT.toByte())
@@ -69,6 +79,7 @@ class Checkpoint(
             buf.putInt(coins[p])
             buf.putInt(earned[p])
             buf.putInt(kills[p])
+            buf.putInt(points[p])
             buf.putInt(fired[p])
             buf.putFloat(dealt[p])
             buf.putInt(taken[p])
@@ -86,14 +97,17 @@ class Checkpoint(
     }
 
     companion object {
-        /** Bump when the layout changes; older saves are then dropped rather than misread. */
-        const val FORMAT = 1
+        /** Bump when the layout changes. Saves from a version before [OLDEST] are dropped rather than misread. */
+        const val FORMAT = 2
+        private const val OLDEST = 1
 
         /** Null when [bytes] are not a save this version can read. */
         fun read(bytes: ByteArray): Checkpoint? {
             val buf = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
             return try {
-                if (buf.get() != 'T'.code.toByte() || buf.get() != 'C'.code.toByte() || buf.get().toInt() != FORMAT) return null
+                if (buf.get() != 'T'.code.toByte() || buf.get() != 'C'.code.toByte()) return null
+                val format = buf.get().toInt()
+                if (format !in OLDEST..FORMAT) return null
                 val difficulty = Difficulty.entries.getOrNull(buf.get().toInt()) ?: return null
                 val stage = buf.short.toInt()
                 val tick = buf.int
@@ -115,6 +129,8 @@ class Checkpoint(
                     cp.coins[p] = buf.int
                     cp.earned[p] = buf.int
                     cp.kills[p] = buf.int
+                    // Saves from before the score existed start counting kill points from here.
+                    if (format >= 2) cp.points[p] = buf.int
                     cp.fired[p] = buf.int
                     cp.dealt[p] = buf.float
                     cp.taken[p] = buf.int

@@ -15,6 +15,16 @@ class TextBufTest {
     }
 
     @Test
+    fun writesThousandsWithCommas() {
+        assertEquals("0", TextBuf().putGrouped(0).text())
+        assertEquals("999", TextBuf().putGrouped(999).text())
+        assertEquals("1,000", TextBuf().putGrouped(1000).text())
+        assertEquals("12,408", TextBuf().putGrouped(12_408).text())
+        assertEquals("1,234,567", TextBuf().putGrouped(1_234_567).text())
+        assertEquals("-4,210", TextBuf().putGrouped(-4210).text())
+    }
+
+    @Test
     fun writesOneDecimal() {
         assertEquals("16.7", TextBuf().putTenths(16.666f).text())
         assertEquals("0.0", TextBuf().putTenths(0.04f).text())

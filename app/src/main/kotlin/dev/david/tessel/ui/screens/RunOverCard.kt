@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -26,7 +27,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
+import dev.david.tessel.core.content.Bestiary
+import dev.david.tessel.core.sim.Cause
 import dev.david.tessel.platform.game.RunSummary
+import dev.david.tessel.ui.components.EnemyMark
 import dev.david.tessel.ui.components.PrimaryButton
 import dev.david.tessel.ui.components.SecondaryButton
 import dev.david.tessel.ui.components.Text
@@ -36,8 +40,12 @@ import dev.david.tessel.ui.theme.Springs
 import dev.david.tessel.ui.theme.Theme
 import dev.david.tessel.ui.theme.Type
 
+/**
+ * The last screen of a run: what ended it, the score and where it came from,
+ * and the run in numbers.
+ */
 @Composable
-fun RunOverCard(visible: Boolean, summary: RunSummary?, newBest: Boolean, onAgain: () -> Unit, onHome: () -> Unit) {
+fun RunOverCard(visible: Boolean, summary: RunSummary?, onAgain: () -> Unit, onHome: () -> Unit) {
     val c = Theme.colors
     val shown = remember { Animatable(0f) }
     var present by remember { mutableStateOf(visible) }
@@ -61,7 +69,6 @@ fun RunOverCard(visible: Boolean, summary: RunSummary?, newBest: Boolean, onAgai
             .pointerInput(Unit) { detectTapGestures { } },
         contentAlignment = Alignment.Center,
     ) {
-        // How far the run got, and what to do next, on the left; how it went, on the right.
         Row(
             Modifier
                 .graphicsLayer {
@@ -70,38 +77,82 @@ fun RunOverCard(visible: Boolean, summary: RunSummary?, newBest: Boolean, onAgai
                     scaleY = s
                 }
                 .padding(horizontal = Space.x6)
-                .widthIn(max = 820.dp)
+                .widthIn(max = 840.dp)
                 .clip(RoundedCornerShape(Corner.sheet))
                 .background(c.surface)
                 .padding(Space.x6),
             horizontalArrangement = Arrangement.spacedBy(Space.x8),
         ) {
-            Column(Modifier.width(300.dp)) {
+            // What ended it and what it was worth, with the way out.
+            Column(Modifier.width(310.dp)) {
                 Text("Run over", Type.title1, c.ink)
-                val sub = summary.difficulty.label + if (newBest) " · New best" else ""
+                val sub = summary.difficulty.label + if (summary.newBest) "  ·  New best" else ""
                 Text(sub, Type.subhead, c.ink2)
+                Spacer(Modifier.height(Space.x4))
+                KilledBy(summary.killedBy)
+                ScoreBlock(summary)
+                Spacer(Modifier.weight(1f, fill = false))
                 Spacer(Modifier.height(Space.x5))
-                Row {
-                    Stat("Stage", summary.stage.toString(), Modifier.weight(1f))
-                    Stat("Time", clock(summary.seconds), Modifier.weight(1f))
-                    if (summary.bosses > 0) Stat(if (summary.bosses == 1) "Boss" else "Bosses", summary.bosses.toString(), Modifier.weight(1f))
-                }
-                Spacer(Modifier.height(Space.x6))
                 Row(horizontalArrangement = Arrangement.spacedBy(Space.x3)) {
                     SecondaryButton("Home", onHome, Modifier.weight(1f))
                     PrimaryButton("Play Again", onAgain, Modifier.weight(1f))
                 }
             }
-            RunStats(summary, Modifier.weight(1f, fill = false).padding(top = Space.x2), header = false)
+            RunStats(summary, Modifier.weight(1f, fill = false).padding(top = Space.x2))
         }
     }
 }
 
+/** The enemy that took the last health, with its outline in its own colour. Nothing when that is not known. */
 @Composable
-private fun Stat(label: String, value: String, modifier: Modifier) {
+private fun KilledBy(code: Int) {
+    val type = Cause.type(code)
+    if (type < 0 || type >= Bestiary.size) return
     val c = Theme.colors
-    Column(modifier) {
-        Text(value, Type.title2.merge(Type.numbers), c.ink, maxLines = 1)
-        Text(label, Type.footnote, c.ink2)
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.x3)) {
+        EnemyMark(type, size = 44.dp)
+        Column {
+            Text("Killed by", Type.footnote, c.ink3)
+            Text(Bestiary.of(type).name, Type.title3, c.ink, maxLines = 1)
+            Text(if (Cause.isShot(code)) "Hit by its shots." else "Hit by touching it.", Type.footnote, c.ink2)
+        }
+    }
+    Spacer(Modifier.height(Space.x4))
+}
+
+@Composable
+private fun ScoreBlock(summary: RunSummary) {
+    val c = Theme.colors
+    Text("Score", Type.footnote, c.ink3)
+    Text(grouped(summary.score), Type.largeTitle.merge(Type.numbers), c.ink, maxLines = 1)
+    val b = summary.breakdown ?: return
+    Spacer(Modifier.height(Space.x1))
+    // Only the parts that count for something; two to a line keeps the card short.
+    val parts = buildList {
+        add("Kills" to b.kills)
+        add("Time" to b.time)
+        add("Stages" to b.stages)
+        if (b.upgrades > 0) add("Upgrades" to b.upgrades)
+        if (b.bosses > 0) add("Bosses" to b.bosses)
+        if (b.revives > 0) add("Revives" to b.revives)
+    }
+    for (pair in parts.chunked(2)) {
+        Row(Modifier.fillMaxWidth()) {
+            for ((label, value) in pair) Part(label, grouped(value), Modifier.weight(1f))
+            if (pair.size == 1) Spacer(Modifier.weight(1f))
+        }
+    }
+    val x = if (b.multiplier == 1f) "" else "  ×${trimZero(b.multiplier)}"
+    Text("${summary.difficulty.label}$x", Type.footnote, c.ink3)
+}
+
+private fun trimZero(v: Float) = String.format(java.util.Locale.US, "%.1f", v).removeSuffix(".0")
+
+@Composable
+private fun Part(label: String, value: String, modifier: Modifier) {
+    val c = Theme.colors
+    Row(modifier.padding(end = Space.x3)) {
+        Text(label, Type.footnote, c.ink3, Modifier.weight(1f), maxLines = 1)
+        Text(value, Type.footnote.merge(Type.numbers), c.ink2, maxLines = 1)
     }
 }

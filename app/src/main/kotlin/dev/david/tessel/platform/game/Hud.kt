@@ -6,6 +6,7 @@ import android.graphics.Typeface
 import android.os.Build
 import dev.david.tessel.core.content.Bestiary
 import dev.david.tessel.core.sim.Phase
+import dev.david.tessel.core.sim.TICK_HZ
 import dev.david.tessel.core.sim.World
 import dev.david.tessel.design.Palette
 import kotlin.math.min
@@ -40,7 +41,25 @@ class Hud(private val density: Float, fontScale: Float) {
         textSize = 28f * sp
         textAlign = Paint.Align.CENTER
     }
+    private val clockText = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        typeface = semibold()
+        textSize = 14f * sp
+        textAlign = Paint.Align.CENTER
+        fontFeatureSettings = "tnum"
+    }
+    private val scoreText = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        textSize = 13f * sp
+        textAlign = Paint.Align.CENTER
+        fontFeatureSettings = "tnum"
+    }
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG)
+
+    /** The player's score for the readout under the clock. Set each frame by whoever knows it. */
+    private var score = 0
+
+    fun score(value: Int) {
+        score = value
+    }
 
     private var announced = -1
     private var announcedAt = 0L
@@ -102,6 +121,7 @@ class Hud(private val density: Float, fontScale: Float) {
         }
 
         drawStageBar(canvas, w, palette, insetTop, me)
+        drawClock(canvas, w, palette, insetTop)
         drawAnnouncement(canvas, palette, now)
         drawLink(canvas, palette, insetTop, insetRight)
     }
@@ -203,6 +223,18 @@ class Hud(private val density: Float, fontScale: Float) {
         }
     }
 
+    /** How long the run has lasted, with the score under it, below the stage bar. */
+    private fun drawClock(canvas: Canvas, w: World, palette: Palette, insetTop: Int) {
+        val cx = canvas.width / 2f
+        val clockBase = insetTop + CLOCK_TOP_DP * density
+        clockText.color = palette.ink2
+        buf.clear().putClock(w.tick / TICK_HZ)
+        canvas.drawText(buf.chars, 0, buf.length, cx, clockBase, clockText)
+        scoreText.color = palette.ink3
+        buf.clear().put("Score ").putGrouped(score)
+        canvas.drawText(buf.chars, 0, buf.length, cx, clockBase + 17f * sp, scoreText)
+    }
+
     /**
      * The stage number and a bar that fills as the stage runs out. The number
      * is how hard things are; the bar is how long until the shop.
@@ -252,7 +284,8 @@ class Hud(private val density: Float, fontScale: Float) {
             }
             if (message != null) {
                 note.color = palette.danger
-                canvas.drawText(message, cx, top + height + 22f * density, note)
+                // Under the clock and the score.
+                canvas.drawText(message, cx, insetTop + (CLOCK_TOP_DP + 40f) * density, note)
             }
         }
     }
@@ -262,6 +295,9 @@ class Hud(private val density: Float, fontScale: Float) {
 
     private companion object {
         const val BAR_WIDTH_DP = 168f
+
+        /** Where the clock sits, measured from the top of the screen's safe area. */
+        const val CLOCK_TOP_DP = 58f
         const val TRACK_ALPHA = 90
         const val ANNOUNCE_MS = 3200L
 

@@ -19,6 +19,7 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import dev.david.tessel.core.content.Bestiary
 import dev.david.tessel.core.content.Difficulty
+import dev.david.tessel.core.content.Scoring
 import dev.david.tessel.core.content.Upgrades
 import dev.david.tessel.core.net.ClientSession
 import dev.david.tessel.core.net.HOST_PLAYER
@@ -26,6 +27,7 @@ import dev.david.tessel.core.net.HostSession
 import dev.david.tessel.core.net.Snapshot
 import dev.david.tessel.core.net.Wire
 import dev.david.tessel.core.sim.Bot
+import dev.david.tessel.core.sim.Cause
 import dev.david.tessel.core.sim.Checkpoint
 import dev.david.tessel.core.sim.Events
 import dev.david.tessel.core.sim.MAX_PLAYERS
@@ -34,6 +36,8 @@ import dev.david.tessel.core.sim.PlayerInput
 import dev.david.tessel.core.sim.SHOP_SLOTS
 import dev.david.tessel.core.sim.TICK_HZ
 import dev.david.tessel.core.sim.World
+import dev.david.tessel.core.stats.RunEntry
+import dev.david.tessel.core.stats.Tally
 import dev.david.tessel.design.Palette
 import dev.david.tessel.platform.audio.Haptics
 import dev.david.tessel.platform.input.Gamepad
@@ -41,7 +45,9 @@ import dev.david.tessel.platform.input.StickView
 import dev.david.tessel.platform.input.TwinStickController
 import dev.david.tessel.platform.net.HostLink
 import dev.david.tessel.platform.net.Link
+import dev.david.tessel.platform.store.LedgerStore
 import dev.david.tessel.platform.store.Settings
+import dev.david.tessel.platform.store.SoloSaves
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
@@ -114,6 +120,12 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
 
     /** Host: the run was saved for later at [Checkpoint]. Everyone stops here. Game thread. */
     var onSaved: ((Checkpoint) -> Unit)? = null
+
+    /** Where runs are written down and enemies logged. Set before the first run. */
+    @Volatile var ledger: LedgerStore? = null
+
+    /** Solo runs kept for later. Set before the first run. */
+    @Volatile var saves: SoloSaves? = null
     private val roleFlow = MutableStateFlow(Role.SOLO)
     val role: StateFlow<Role> = roleFlow
 
@@ -146,6 +158,14 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
     private var me = HOST_PLAYER
     private var checkpoint: Checkpoint? = null
 
+    // Solo: the slot this run keeps itself in (-1 for none), and what this phone has met and beaten since the last flush.
+    private var soloSlot = -1
+    private val tally = Tally()
+
+    /** This run is in the ledger already; it must not be written twice. */
+    private var recorded = false
+    private var scanFrames = 0
+
     /** Host: bit p set while player p's phone is out of reach. Client: bit 0 while the host is. */
     private var unreachable = 0
     private var publishedReady = 0
@@ -170,10 +190,35 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
 
     // Commands from the menus and the lobby. Each one runs on the game thread, in order.
 
-    fun startRun(difficulty: Difficulty) = onGameThread {
+    fun startRun(difficulty: Difficulty) = onGameThread { beginSolo(difficulty) }
+
+    /** A new solo run in a free slot. With every slot taken it does not start; the menus ask for one to be freed first. */
+    private fun beginSolo(difficulty: Difficulty) {
+        val slot = saves?.free() ?: 0
+        if (slot < 0) return
         dropCoop()
         world.reset(players = 1, seed = SystemClock.elapsedRealtimeNanos(), difficulty = difficulty)
+        soloSlot = slot
         freshRun()
+        keep()
+    }
+
+    /** Carries on the solo run kept in [slot]: in the shop it stopped at, or from the start. */
+    fun continueRun(slot: Int) = onGameThread {
+        val saved = saves?.get(slot) ?: return@onGameThread
+        dropCoop()
+        world.restore(saved.checkpoint, SystemClock.elapsedRealtimeNanos()) { it == HOST_PLAYER }
+        soloSlot = slot
+        freshRun()
+        if (world.phase == Phase.SHOP) {
+            publishShop()
+            enter(Mode.SHOP)
+        }
+    }
+
+    /** Throws away the solo run kept in [slot], from the menu. */
+    fun discardSave(slot: Int) {
+        saves?.delete(slot)
     }
 
     fun startCoopHost(link: HostLink, difficulty: Difficulty, players: Int) = onGameThread {
@@ -217,7 +262,7 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
         when (playingAs) {
             Role.CLIENT -> client?.action(Wire.SAVE)
             Role.HOST -> saveAndStop()
-            Role.SOLO -> Unit
+            Role.SOLO -> saveSolo()
         }
     }
 
@@ -273,16 +318,30 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
 
     fun playAgain(difficulty: Difficulty) = onGameThread {
         when (playingAs) {
-            Role.SOLO -> {
-                world.reset(players = 1, seed = SystemClock.elapsedRealtimeNanos(), difficulty = difficulty)
-                freshRun()
-            }
+            Role.SOLO -> beginSolo(difficulty)
             Role.HOST -> restartHost()
             Role.CLIENT -> client?.action(Wire.RESTART)
         }
     }
 
     fun leaveRun() = onGameThread {
+        dropCoop()
+        shards.clear()
+        shopFlow.value = null
+        enter(Mode.HOME)
+    }
+
+    /** Solo: leaves the run on purpose. It goes in the history as left, and its save is thrown away. */
+    fun abandonRun() = onGameThread {
+        if (playingAs == Role.SOLO && !recorded) {
+            val run = summarize()
+            if (run != null && run.seconds >= MIN_RECORDED_SECONDS) {
+                recorded = true
+                ledger?.record(entryOf(run, left = true))
+            }
+            if (soloSlot > 0) saves?.delete(soloSlot)
+            soloSlot = -1
+        }
         dropCoop()
         shards.clear()
         shopFlow.value = null
@@ -383,6 +442,7 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
 
     fun setResumed(value: Boolean) {
         resumed = value
+        if (!value) handler.post { flushLog() }
         updateRunning()
     }
 
@@ -462,6 +522,7 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
             c.frame(nowNanos)
             react(c.view.events, now)
             hud.link(c.roundTripMillis, qualityOf(0))
+            hud.score(c.latest?.let { clientScore(it, me) } ?: 0)
             shown = c.view
         } else {
             val h = host
@@ -490,7 +551,13 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
             react(world.events, now)
             h?.pump(nowNanos, current == Mode.PAUSED, unreachable != 0)
             if (h == null) hud.link(-1, -1) else showWorstLink(h)
+            hud.score(world.score(me))
             shown = world
+        }
+        // A few times a second is plenty to notice what has come into the arena.
+        if (current == Mode.PLAYING && ++scanFrames % SCAN_EVERY_FRAMES == 0) {
+            val en = shown.enemies
+            for (i in 0 until en.count) tally.see(en.type[i], shown.stage)
         }
         shards.update(usable / 1e9f)
         val blend = if (playingAs != Role.CLIENT && current == Mode.PLAYING) pendingNanos.toFloat() / STEP_NANOS else 1f
@@ -527,11 +594,70 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
 
     /** Host: takes a checkpoint of the run as it is now and hands it on to be stored. */
     private fun keep() {
-        if (playingAs != Role.HOST) return
-        val cp = world.capture()
-        checkpoint = cp
-        onCheckpoint?.invoke(cp)
+        when (playingAs) {
+            Role.HOST -> {
+                val cp = world.capture()
+                checkpoint = cp
+                onCheckpoint?.invoke(cp)
+            }
+            // Alone the run keeps itself in its slot, so it outlives the app being closed.
+            Role.SOLO -> if (soloSlot > 0) saves?.write(soloSlot, world.capture())
+            Role.CLIENT -> Unit
+        }
     }
+
+    /** Solo: stops here and goes home; the run waits in its slot at the shop it last passed. */
+    private fun saveSolo() {
+        if (world.phase == Phase.SHOP) keep()
+        soloSlot = -1
+        shards.clear()
+        shopFlow.value = null
+        statsFlow.value = null
+        enter(Mode.HOME)
+    }
+
+    private fun flushLog() {
+        ledger?.merge(tally)
+    }
+
+    /** Writes a finished run into the ledger once, and hands the end screen its summary. */
+    private fun finishRun(run: RunSummary) {
+        if (recorded) {
+            summaryFlow.value = run
+            return
+        }
+        recorded = true
+        val by = Cause.type(run.killedBy)
+        if (by >= 0) tally.slain(by, run.stage)
+        val best = ledger?.record(entryOf(run, left = false)) ?: false
+        flushLog()
+        summaryFlow.value = run.withBest(best)
+    }
+
+    private fun entryOf(run: RunSummary, left: Boolean): RunEntry {
+        val you = run.you
+        return RunEntry(
+            endedAt = System.currentTimeMillis(),
+            difficulty = run.difficulty,
+            stage = run.stage,
+            seconds = run.seconds,
+            score = run.score,
+            kills = run.kills,
+            coins = run.coins,
+            bosses = run.bosses,
+            players = run.players,
+            killedBy = run.killedBy,
+            left = left,
+            damage = you?.damage ?: 0,
+            shots = you?.shots ?: 0,
+            hitsTaken = you?.hitsTaken ?: 0,
+            downed = you?.downed ?: 0,
+            revives = you?.revives ?: 0,
+            upgrades = you?.upgrades ?: 0,
+        )
+    }
+
+    private val stageNow get() = if (playingAs == Role.CLIENT) client?.view?.stage ?: 1 else world.stage
 
     /** Host: in the shop the run is kept as it is; mid-stage, as it was when that stage's shop closed. */
     private fun saveAndStop() {
@@ -554,6 +680,7 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
             val s = c?.latest ?: return null
             val team = (0 until s.playerCount).map { p ->
                 PlayerStats(
+                    score = clientScore(s, p),
                     name = known.getOrNull(p) ?: "Player ${p + 1}",
                     you = p == me,
                     present = s.present and (1 shl p) != 0,
@@ -567,11 +694,17 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
                     upgrades = s.bought[p],
                 )
             }
-            return RunSummary(s.tick / TICK_HZ, s.stage, s.kills[me], s.earned[me], s.difficulty, Integer.bitCount(s.present), s.bossesDown, team)
+            val cleared = if (s.phase == Phase.SHOP) s.stage else s.stage - 1
+            val breakdown = Scoring.breakdown(s.difficulty, s.tick / TICK_HZ, cleared, s.bossesDown, s.points[me], s.bought[me], s.revived[me])
+            return RunSummary(
+                s.tick / TICK_HZ, s.stage, s.kills[me], s.earned[me], s.difficulty, Integer.bitCount(s.present), s.bossesDown, team,
+                score = breakdown.total, breakdown = breakdown, killedBy = s.killedBy[me],
+            )
         }
         val pl = world.players
         val team = (0 until world.playerCount).map { p ->
             PlayerStats(
+                score = world.score(p),
                 name = if (world.playerCount == 1) "You" else known.getOrNull(p) ?: "Player ${p + 1}",
                 you = p == me,
                 present = pl.present[p],
@@ -585,7 +718,19 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
                 upgrades = pl.bought(p),
             )
         }
-        return RunSummary(world.tick / TICK_HZ, world.stage, pl.kills[me], pl.earned[me], world.difficulty, world.presentCount(), world.bossesDown, team)
+        val breakdown = Scoring.breakdown(
+            world.difficulty, world.tick / TICK_HZ, world.stagesCleared, world.bossesDown, pl.points[me], pl.bought(me), pl.revived[me],
+        )
+        return RunSummary(
+            world.tick / TICK_HZ, world.stage, pl.kills[me], pl.earned[me], world.difficulty, world.presentCount(), world.bossesDown, team,
+            score = breakdown.total, breakdown = breakdown, killedBy = pl.killedBy[me],
+        )
+    }
+
+    /** Player [p]'s score from the newest snapshot; the host works it out from its own world. */
+    private fun clientScore(s: Snapshot, p: Int): Int {
+        val cleared = if (s.phase == Phase.SHOP) s.stage else s.stage - 1
+        return Scoring.total(s.difficulty, s.tick / TICK_HZ, cleared, s.bossesDown, s.points[p], s.bought[p], s.revived[p])
     }
 
     /** Turns what happened this frame into shards, haptics and menu changes, then forgets it. */
@@ -597,12 +742,14 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
                     val type = ev.who[i]
                     if (type !in 0 until Bestiary.size) continue
                     val def = Bestiary.of(type)
+                    tally.defeat(type, stageNow)
                     shards.burst(
                         def.shape, ev.x[i], ev.y[i], def.radius, ev.angle[i], ev.dx[i], ev.dy[i],
                         renderer.bodyOf(type), renderer.facetOf(type),
                     )
                 }
                 Events.BOSS_IN -> {
+                    tally.see(ev.who[i], stageNow)
                     hud.announce(ev.who[i], now)
                     haptics.down()
                 }
@@ -619,7 +766,12 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
                 Events.RUN_OVER -> {
                     haptics.down()
                     if (playingAs != Role.CLIENT) {
-                        summaryFlow.value = summarize()
+                        summarize()?.let(::finishRun)
+                        if (playingAs == Role.SOLO && soloSlot > 0) {
+                            // Over; nothing left to carry on.
+                            saves?.delete(soloSlot)
+                            soloSlot = -1
+                        }
                         if (playingAs == Role.HOST) {
                             // Nothing left to carry on.
                             checkpoint = null
@@ -660,7 +812,7 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
             else -> Mode.PLAYING
         }
         if (wanted == Mode.SHOP) publishClientShop(s)
-        if (wanted == Mode.OVER && current != Mode.OVER) summaryFlow.value = summarize()
+        if (wanted == Mode.OVER && current != Mode.OVER) summarize()?.let(::finishRun)
         if (wanted != current) {
             if (wanted == Mode.PLAYING) restartClock()
             enter(wanted)
@@ -723,6 +875,8 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
     }
 
     private fun freshRun() {
+        flushLog()
+        recorded = false
         shards.clear()
         shopFlow.value = null
         summaryFlow.value = null
@@ -843,6 +997,8 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
 
     private fun enter(mode: Mode) {
         if (mode == Mode.PAUSED) statsFlow.value = summarize()
+        // Anything but playing is a safe moment to put what was met and beaten on record.
+        if (mode != Mode.PLAYING) flushLog()
         current = mode
         modeFlow.value = mode
     }
@@ -886,5 +1042,9 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
         const val LOG_EVERY_WINDOWS = 10
         const val NET_LOG_NANOS = 2_000_000_000L
         const val LOOPBACK_DELAY_MS = 35L
+
+        /** A run left this soon after it began is not worth a line in the history. */
+        const val MIN_RECORDED_SECONDS = 20
+        const val SCAN_EVERY_FRAMES = 15
     }
 }

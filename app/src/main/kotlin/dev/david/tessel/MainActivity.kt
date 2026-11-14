@@ -15,7 +15,9 @@ import dev.david.tessel.platform.game.GameSurfaceView
 import dev.david.tessel.platform.game.Mode
 import dev.david.tessel.platform.game.StressRig
 import dev.david.tessel.platform.net.CoopLobby
+import dev.david.tessel.platform.store.LedgerStore
 import dev.david.tessel.platform.store.SettingsStore
+import dev.david.tessel.platform.store.SoloSaves
 import dev.david.tessel.platform.update.Updater
 import dev.david.tessel.ui.TesselApp
 import dev.david.tessel.ui.theme.TesselTheme
@@ -29,7 +31,10 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
         val store = SettingsStore(this)
+        val ledger = LedgerStore(java.io.File(filesDir, "ledger.dat"))
+        val saves = SoloSaves(filesDir)
         game = GameSurfaceView(this)
+        game.ledger = ledger
         lobby = CoopLobby(this, game)
         updater = Updater(this)
 
@@ -37,6 +42,8 @@ class MainActivity : ComponentActivity() {
         val stress = intent.getBooleanExtra("stress", false)
         val loopback = intent.getBooleanExtra("loopback", false)
         if (stress) game.stress = StressRig()
+        // Debug runs that start by themselves must not fill the save slots.
+        if (!stress && !loopback && !intent.getBooleanExtra("autostart", false)) game.saves = saves
         val debuggable = applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
         if (debuggable && intent.getBooleanExtra("bot", false)) game.autopilot = Bot()
         if (debuggable && intent.getBooleanExtra("nodirect", false)) lobby.directAllowed = false
@@ -50,7 +57,7 @@ class MainActivity : ComponentActivity() {
         // nothing that can be touched, touches fall through to the game view
         // untouched, with no translation between toolkits.
         val menus = ComposeView(this).apply {
-            setContent { TesselTheme { TesselApp(game, lobby, store, updater, onStart) } }
+            setContent { TesselTheme { TesselApp(game, lobby, store, ledger, saves, updater, onStart) } }
         }
         setContentView(
             FrameLayout(this).apply {
