@@ -238,6 +238,7 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
             if (dev.startStage > 1) world.skipTo(dev.startStage)
             world.players.coins[0] = dev.startCoins
             world.bringDevBoss()
+            world.devUpgrades(dev.upgrades)
         }
         soloSlot = slot
         markCheating(cheat)

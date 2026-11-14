@@ -4,6 +4,7 @@ import dev.david.tessel.core.content.Balance
 import dev.david.tessel.core.content.Bestiary
 import dev.david.tessel.core.content.Difficulty
 import dev.david.tessel.core.content.Scoring
+import dev.david.tessel.core.content.Upgrades
 import dev.david.tessel.core.rng.Rng
 import kotlin.math.PI
 import kotlin.math.atan2
@@ -107,6 +108,19 @@ class World(seed: Long = 1L) {
 
     fun devAllow(kinds: BooleanArray?) {
         director.allow = kinds
+    }
+
+    /** Developer option: gives player 0 these upgrade levels (id to level) before the run, with the health a Max Health level adds. */
+    fun devUpgrades(levels: Map<Int, Int>) {
+        for ((id, level) in levels) {
+            if (id !in 0 until Upgrades.count) continue
+            val n = level.coerceIn(0, Upgrades.of(id).maxLevel)
+            players.levels[0][id] = n
+            if (id == Upgrades.MAX_HEALTH) {
+                players.maxHp[0] += n
+                players.hp[0] = players.maxHp[0]
+            }
+        }
     }
 
     /** Starts the chosen boss walking in at the start of a run. */

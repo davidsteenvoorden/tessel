@@ -22,6 +22,8 @@ data class Dev(
     /** A boss kind that comes in every stage, or -1. */
     val boss: Int = -1,
     val tweaks: Map<Int, Tweak> = emptyMap(),
+    /** Upgrade levels to start a trial run with, by upgrade id. */
+    val upgrades: Map<Int, Int> = emptyMap(),
     val startStage: Int = 1,
     val startCoins: Int = 0,
     val invincible: Boolean = false,
@@ -95,6 +97,7 @@ class SettingsStore(context: Context) {
             .putString(KEY_DEV_OFF, next.dev.off.joinToString(","))
             .putInt(KEY_DEV_BOSS, next.dev.boss)
             .putString(KEY_DEV_TWEAKS, encodeTweaks(next.dev.tweaks))
+            .putString(KEY_DEV_UPGRADES, next.dev.upgrades.entries.joinToString(";") { "${it.key}:${it.value}" })
             .putInt(KEY_DEV_STAGE, next.dev.startStage)
             .putInt(KEY_DEV_COINS, next.dev.startCoins)
             .putBoolean(KEY_DEV_INVINCIBLE, next.dev.invincible)
@@ -118,6 +121,12 @@ class SettingsStore(context: Context) {
             off = prefs.getString(KEY_DEV_OFF, null).orEmpty().split(',').mapNotNull { it.toIntOrNull() }.toSet(),
             boss = prefs.getInt(KEY_DEV_BOSS, -1),
             tweaks = decodeTweaks(prefs.getString(KEY_DEV_TWEAKS, null)),
+            upgrades = prefs.getString(KEY_DEV_UPGRADES, null).orEmpty().split(';').mapNotNull {
+                val f = it.split(':')
+                val id = f.getOrNull(0)?.toIntOrNull() ?: return@mapNotNull null
+                val n = f.getOrNull(1)?.toIntOrNull() ?: return@mapNotNull null
+                id to n
+            }.toMap(),
             startStage = prefs.getInt(KEY_DEV_STAGE, 1).coerceIn(1, 99),
             startCoins = prefs.getInt(KEY_DEV_COINS, 0).coerceAtLeast(0),
             invincible = prefs.getBoolean(KEY_DEV_INVINCIBLE, false),
@@ -143,6 +152,7 @@ class SettingsStore(context: Context) {
         const val KEY_DEV_OFF = "dev_off"
         const val KEY_DEV_BOSS = "dev_boss"
         const val KEY_DEV_TWEAKS = "dev_tweaks"
+        const val KEY_DEV_UPGRADES = "dev_upgrades"
         const val KEY_DEV_STAGE = "dev_stage"
         const val KEY_DEV_COINS = "dev_coins"
         const val KEY_DEV_INVINCIBLE = "dev_invincible"

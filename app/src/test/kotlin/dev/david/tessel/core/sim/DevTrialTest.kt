@@ -1,6 +1,7 @@
 package dev.david.tessel.core.sim
 
 import dev.david.tessel.core.content.Bestiary
+import dev.david.tessel.core.content.Upgrades
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -56,5 +57,15 @@ class DevTrialTest {
         w.spawnEnemy(Bestiary.DOT, w.players.x[0] + 2f, w.players.y[0])
         repeat(30) { w.step(inputs) }
         assertEquals(hp - 3, w.players.hp[0])
+    }
+
+    @Test
+    fun startingUpgradesAreOnThePlayerBeforeTheRun() {
+        val w = world()
+        w.devUpgrades(mapOf(Upgrades.MAX_HEALTH to 3, Upgrades.MULTISHOT to 2, Upgrades.DAMAGE to 999))
+        assertEquals(3, w.players.levels[0][Upgrades.MAX_HEALTH])
+        assertEquals(3, w.players.volley(0))
+        assertEquals(Upgrades.of(Upgrades.DAMAGE).maxLevel, w.players.levels[0][Upgrades.DAMAGE])
+        assertEquals(w.players.maxHp[0], w.players.hp[0])
     }
 }

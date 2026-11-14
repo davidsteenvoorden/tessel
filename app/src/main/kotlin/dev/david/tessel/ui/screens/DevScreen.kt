@@ -34,6 +34,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import dev.david.tessel.core.content.Bestiary
+import dev.david.tessel.core.content.Upgrades
 import dev.david.tessel.ui.components.NavRow
 import dev.david.tessel.ui.components.PrimaryButton
 import dev.david.tessel.platform.dev.LogExport
@@ -146,6 +147,31 @@ fun DevScreen(
                             selected = DEV_SPEEDS.indexOf(dev.speed).coerceAtLeast(0),
                             onSelect = { i -> change { it.copy(speed = DEV_SPEEDS[i]) } },
                         )
+                    }
+                }
+
+                Group("Starting Upgrades", footer = "Levels a trial run begins with. Only for Try a Run With These.") {
+                    for (id in 0 until Upgrades.count) {
+                        val def = Upgrades.of(id)
+                        val level = dev.upgrades[id] ?: 0
+                        fun set(n: Int) = change {
+                            val v = n.coerceIn(0, def.maxLevel)
+                            it.copy(upgrades = if (v == 0) it.upgrades - id else it.upgrades + (id to v))
+                        }
+                        if (id > 0) Divider()
+                        Row(
+                            Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = Space.x4, vertical = Space.x2),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(def.name, Type.body, c.ink)
+                                Text(def.blurb, Type.footnote, c.ink3, maxLines = 1)
+                            }
+                            Nudge("-1") { set(level - 1) }
+                            Text("$level", Type.headline.merge(Type.numbers), c.ink, Modifier.width(44.dp), align = androidx.compose.ui.text.style.TextAlign.Center)
+                            Nudge("+1") { set(level + 1) }
+                            Nudge("Max") { set(def.maxLevel) }
+                        }
                     }
                 }
 
