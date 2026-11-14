@@ -490,12 +490,12 @@ internal class Brains(private val w: World) {
         if (e.timer[i] > 0) e.timer[i]--
         e.cue[i] = if (e.timer[i] < TELL_TICKS) 1f - e.timer[i] / TELL_TICKS.toFloat() else 0f
         if (e.timer[i] > 0) return
-        e.timer[i] = seconds((if (phase == 1) 3.4f else if (phase == 2) 2.8f else 2.3f) / rate)
+        e.timer[i] = seconds((if (phase == 1) 3.0f else if (phase == 2) 2.4f else 1.9f) / rate)
         e.aux[i] += 1f
-        val fromTop = phase == 3 || phase == 1 || e.aux[i].toInt() % 2 == 0
-        val fromSide = phase == 3 || (phase == 2 && !fromTop)
+        val fromTop = phase != 2 || e.aux[i].toInt() % 2 == 0
+        val fromSide = phase >= 2
         if (fromTop) {
-            val slots = 16
+            val slots = 22
             val gap = w.rng.int(0, slots - 4)
             for (k in 0 until slots) {
                 if (k - gap in 0..2) continue
@@ -503,7 +503,7 @@ internal class Brains(private val w: World) {
             }
         }
         if (fromSide) {
-            val slots = 8
+            val slots = 12
             val gap = w.rng.int(0, slots - 3)
             for (k in 0 until slots) {
                 if (k - gap in 0..1) continue
@@ -522,11 +522,11 @@ internal class Brains(private val w: World) {
         if (e.timer[i] > 0) e.timer[i]--
         e.cue[i] = if (e.timer[i] < TELL_TICKS) 1f - e.timer[i] / TELL_TICKS.toFloat() else 0f
         if (e.timer[i] <= 0 && target >= 0) {
-            e.timer[i] = seconds(1.1f / rate)
-            val n = if (phase == 1) 2 else if (phase == 2) 3 else 5
-            fan(e.x[i], e.y[i], angleTo(i, target), n, if (phase == 3) 0.26f else 0.16f, 200f, def.radius)
+            e.timer[i] = seconds(0.9f / rate)
+            val n = if (phase == 1) 3 else if (phase == 2) 5 else 8
+            fan(e.x[i], e.y[i], angleTo(i, target), n, if (phase == 3) 0.22f else 0.16f, 205f, def.radius)
         }
-        if (phase >= 2 && e.modeTicks[i] % seconds(4f) == 0) ring(e.x[i], e.y[i], 8, e.aux[i], 150f, def.radius)
+        if (phase >= 2 && e.modeTicks[i] % seconds(3f) == 0) ring(e.x[i], e.y[i], if (phase == 3) 16 else 12, e.aux[i], 150f, def.radius)
     }
 
     /** Three beats of streaming shots along a plus, then along a cross; later both together and turning. */
@@ -536,9 +536,9 @@ internal class Brains(private val w: World) {
         if (e.timer[i] > 0) e.timer[i]--
         e.cue[i] = if (e.timer[i] < TELL_TICKS) 1f - e.timer[i] / TELL_TICKS.toFloat() else 0f
         if (e.timer[i] > 0) return
-        e.timer[i] = seconds((if (phase == 3) 1.2f else 1.7f) / rate)
+        e.timer[i] = seconds((if (phase == 3) 1.0f else 1.5f) / rate)
         e.aux[i] += 1f
-        val n = if (phase == 1) 4 else 8
+        val n = if (phase == 1) 6 else 12
         val offset = (if (e.aux[i].toInt() % 2 == 0) 0f else HALF_PI / 2f) + (if (phase == 3) e.aux[i] * 0.18f else 0f)
         for (speed in LATTICE_SPEEDS) ring(e.x[i], e.y[i], n, offset, speed, def.radius)
     }
@@ -549,14 +549,14 @@ internal class Brains(private val w: World) {
         chase(i, target, def.speed * scale * 0.8f)
         if (e.timer[i] > 0) e.timer[i]--
         if (e.timer[i] <= 0) {
-            e.timer[i] = seconds(0.5f / rate)
+            e.timer[i] = seconds(0.32f / rate)
             w.spawnHostile(e.x[i], e.y[i], w.rng.range(0f, TWO_PI), 35f, shooter)
         }
-        val every = seconds(if (phase == 2) 4f else 3f)
+        val every = seconds(if (phase == 2) 3.5f else 2.6f)
         e.cue[i] = if (phase >= 2 && every - e.modeTicks[i] % every < TELL_TICKS) 1f - (every - e.modeTicks[i] % every) / TELL_TICKS.toFloat() else 0f
-        if (phase >= 2 && e.modeTicks[i] % every == 0) ring(e.x[i], e.y[i], 12, w.rng.range(0f, TWO_PI), 150f, def.radius)
-        if (phase == 3 && target >= 0 && e.modeTicks[i] % seconds(2f) == 0) {
-            fan(e.x[i], e.y[i], angleTo(i, target), 3, 0.22f, 190f, def.radius)
+        if (phase >= 2 && e.modeTicks[i] % every == 0) ring(e.x[i], e.y[i], if (phase == 3) 20 else 16, w.rng.range(0f, TWO_PI), 150f, def.radius)
+        if (phase == 3 && target >= 0 && e.modeTicks[i] % seconds(1.6f) == 0) {
+            fan(e.x[i], e.y[i], angleTo(i, target), 5, 0.2f, 190f, def.radius)
         }
     }
 
@@ -623,7 +623,7 @@ internal class Brains(private val w: World) {
 
     private companion object {
         const val HALF_PI = (PI / 2).toFloat()
-        val LATTICE_SPEEDS = floatArrayOf(120f, 155f, 190f)
+        val LATTICE_SPEEDS = floatArrayOf(115f, 145f, 175f, 205f)
         const val LANCE_HOVER = 1
         const val LANCE_WINDUP = 2
         const val LANCE_CHARGE = 3

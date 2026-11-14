@@ -207,19 +207,19 @@ object Bestiary {
             move = Move.BOSS, boss = true, blurb = "Spirals that change direction. Keep moving with them.",
         ),
         EnemyDef(
-            "Rampart", Shape.SQUARE, radius = 48f, hp = 1100f, speed = 38f, mass = 60f, cost = 0f, coins = 70, hue = 104, tone = -1,
+            "Rampart", Shape.SQUARE, radius = 48f, hp = 1500f, speed = 38f, mass = 60f, cost = 0f, coins = 70, hue = 104, tone = -1,
             move = Move.BOSS, boss = true, blurb = "Sends walls of shots across the arena. Find the gap.",
         ),
         EnemyDef(
-            "Pendulum", Shape.DIAMOND, radius = 38f, hp = 1350f, speed = 120f, mass = 50f, cost = 0f, coins = 80, hue = 172, tone = -1,
+            "Pendulum", Shape.DIAMOND, radius = 38f, hp = 1800f, speed = 120f, mass = 50f, cost = 0f, coins = 80, hue = 172, tone = -1,
             move = Move.BOSS, boss = true, blurb = "Swings round the arena and fires as it passes.",
         ),
         EnemyDef(
-            "Lattice", Shape.CROSS, radius = 46f, hp = 1600f, speed = 30f, mass = 60f, cost = 0f, coins = 90, hue = 237, tone = -1,
+            "Lattice", Shape.CROSS, radius = 46f, hp = 2100f, speed = 30f, mass = 60f, cost = 0f, coins = 90, hue = 237, tone = -1,
             move = Move.BOSS, boss = true, spin = 0.2f, blurb = "Streams of shots along a plus, then a cross. Stand between the lines.",
         ),
         EnemyDef(
-            "Sower", Shape.PENTAGON, radius = 42f, hp = 2000f, speed = 70f, mass = 60f, cost = 0f, coins = 100, hue = 112, tone = -1,
+            "Sower", Shape.PENTAGON, radius = 42f, hp = 2600f, speed = 70f, mass = 60f, cost = 0f, coins = 100, hue = 112, tone = -1,
             move = Move.BOSS, boss = true, spin = 0.3f, blurb = "Leaves slow shots behind it and bursts them outward.",
         ),
     )
