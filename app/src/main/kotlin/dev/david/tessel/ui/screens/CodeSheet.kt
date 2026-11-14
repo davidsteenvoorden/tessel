@@ -96,14 +96,57 @@ fun CodePanel(onUnlock: () -> Unit, onCancel: () -> Unit) {
     }
 }
 
+/**
+ * A number of minutes typed on the same pad. Set keeps it, Off turns the
+ * reminder off, Cancel leaves it as it was. Up to three digits.
+ */
 @Composable
-private fun Key(label: String, small: Boolean = false, onClick: () -> Unit) {
+fun MinutesPanel(initial: Int, max: Int, onSet: (Int) -> Unit, onCancel: () -> Unit) {
+    val c = Theme.colors
+    var typed by remember { mutableStateOf(if (initial > 0) initial.toString() else "") }
+    val value = typed.toIntOrNull() ?: 0
+
+    Row(
+        Modifier.padding(start = Space.x6, end = Space.x6, top = Space.x3, bottom = Space.x5),
+        horizontalArrangement = Arrangement.spacedBy(Space.x8),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.width(260.dp)) {
+            Text("Break Reminder", Type.title3, c.ink)
+            Spacer(Modifier.height(Space.x1))
+            Text("Minutes of play between reminders.", Type.subhead, c.ink2)
+            Spacer(Modifier.height(Space.x4))
+            Text(if (value == 0) "Off" else if (value == 1) "1 minute" else "$value minutes", Type.title2.merge(Type.numbers), c.ink)
+            Text(if (value > max) "At most $max." else " ", Type.footnote, c.danger)
+            Spacer(Modifier.height(Space.x2))
+            Row(horizontalArrangement = Arrangement.spacedBy(Space.x2)) {
+                Key("Cancel", small = true, onClick = onCancel, width = 100.dp)
+                Key("Off", small = true, onClick = { onSet(0) }, width = 100.dp)
+            }
+        }
+        Column(verticalArrangement = Arrangement.spacedBy(Space.x2)) {
+            for (row in listOf("123", "456", "789")) {
+                Row(horizontalArrangement = Arrangement.spacedBy(Space.x2)) {
+                    for (d in row) Key(d.toString()) { if (typed.length < 3) typed = (typed + d).trimStart('0') }
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(Space.x2)) {
+                Key("Delete", small = true) { typed = typed.dropLast(1) }
+                Key("0") { if (typed.isNotEmpty() && typed.length < 3) typed += "0" }
+                Key("Set", small = true) { if (value <= max) onSet(value) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun Key(label: String, small: Boolean = false, width: androidx.compose.ui.unit.Dp = 84.dp, onClick: () -> Unit) {
     val c = Theme.colors
     val source = remember { MutableInteractionSource() }
     Box(
         Modifier
             .pressScale(source)
-            .width(84.dp)
+            .width(width)
             .height(46.dp)
             .focusRing(source)
             .clip(RoundedCornerShape(Corner.button))

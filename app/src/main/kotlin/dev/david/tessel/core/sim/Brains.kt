@@ -80,13 +80,14 @@ internal class Brains(private val w: World) {
         escorts = 0
         for (i in 0 until e.count) if (e.type[i] == Bestiary.DRONE && e.hp[i] > 0f) escorts++
 
-        val scale = w.enemySpeedScale()
+        val baseScale = w.enemySpeedScale()
         val rate = w.attackRate()
         // Things released this tick wait for the next one.
         val n = e.count
         for (i in 0 until n) {
             if (e.hp[i] <= 0f) continue
             val def = Bestiary.of(e.type[i])
+            val scale = baseScale * w.devSpeed[e.type[i]]
             shooter = e.type[i]
             if (e.flash[i] > 0) e.flash[i]--
             val target = w.nearestPlayer(e.x[i], e.y[i])

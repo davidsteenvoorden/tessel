@@ -13,9 +13,6 @@ import kotlin.math.sin
  */
 val ROUND_SPLITS = floatArrayOf(171f, 294f, 385f, 531f)
 
-/** Half the side of a square body as a share of its collision radius. */
-const val SQUARE_HALF = 0.86f
-
 /** Paths are built at this size and scaled down, which keeps their curves smooth. */
 const val PATH_UNIT = 32f
 

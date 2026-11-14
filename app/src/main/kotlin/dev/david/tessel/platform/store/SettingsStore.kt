@@ -12,13 +12,16 @@ enum class StickSize(val label: String, val radiusDp: Float) {
     LARGE("Large", 68f),
 }
 
-/** Minutes of play between break reminders; 0 turns them off. */
-val BREAK_CHOICES = listOf(0, 20, 30, 45, 60, 90)
+/** The longest time between break reminders, in minutes. 0 turns them off. */
+const val MAX_BREAK_MINUTES = 600
 
 /** What the developer page can change for a solo run. Never applies to a team, and a run that uses any of it is not recorded. */
 data class Dev(
-    /** Replaces the chosen difficulty; null leaves it. */
-    val difficulty: Difficulty? = null,
+    /** Kinds that do not come in. Empty leaves the usual order; anything else brings the rest from the first stage. */
+    val off: Set<Int> = emptySet(),
+    /** A boss kind that comes in every stage, or -1. */
+    val boss: Int = -1,
+    val tweaks: Map<Int, Tweak> = emptyMap(),
     val startStage: Int = 1,
     val startCoins: Int = 0,
     val invincible: Boolean = false,
@@ -26,9 +29,29 @@ data class Dev(
     val speed: Float = 1f,
 ) {
     val active get() = this != Dev()
+
+    /** Anything that changes how a run plays once it is going; a start stage or coins only matter at the start. */
+    val changesTheRun get() = invincible || noSpawns || speed != 1f || off.isNotEmpty() || boss >= 0 || tweaks.values.any { it != Tweak() }
+
+    fun tweak(kind: Int) = tweaks[kind] ?: Tweak()
 }
 
+/** One kind of enemy changed for a trial run: speed and health as multiples, and how much health each of its hits takes. */
+data class Tweak(val speed: Float = 1f, val health: Float = 1f, val damage: Int = 1)
+
 val DEV_SPEEDS = listOf(0.5f, 1f, 1.5f, 2f)
+val TWEAK_SPEEDS = listOf(0.5f, 1f, 2f, 3f)
+val TWEAK_HEALTH = listOf(0.5f, 1f, 2f, 5f, 10f)
+val TWEAK_DAMAGE = listOf(1, 2, 3, 5)
+
+private fun encodeTweaks(m: Map<Int, Tweak>) = m.entries.joinToString(";") { (k, t) -> "$k:${t.speed}:${t.health}:${t.damage}" }
+
+private fun decodeTweaks(s: String?): Map<Int, Tweak> = s.orEmpty().split(';').mapNotNull { part ->
+    val f = part.split(':')
+    if (f.size != 4) return@mapNotNull null
+    val k = f[0].toIntOrNull() ?: return@mapNotNull null
+    k to Tweak(f[1].toFloatOrNull() ?: 1f, f[2].toFloatOrNull() ?: 1f, f[3].toIntOrNull() ?: 1)
+}.toMap()
 
 data class Settings(
     val difficulty: Difficulty = Difficulty.NORMAL,
@@ -39,7 +62,7 @@ data class Settings(
     val showStats: Boolean = false,
     /** Ping and link type in co-op, top right. */
     val showLink: Boolean = true,
-    /** Minutes between break reminders, one of [BREAK_CHOICES]. */
+    /** Minutes between break reminders, 0 for off. */
     val breakEvery: Int = 0,
     val tutorialSeen: Boolean = false,
     val devUnlocked: Boolean = false,
@@ -69,7 +92,9 @@ class SettingsStore(context: Context) {
             .putInt(KEY_BREAK, next.breakEvery)
             .putBoolean(KEY_TUTORIAL, next.tutorialSeen)
             .putBoolean(KEY_DEV_UNLOCKED, next.devUnlocked)
-            .putString(KEY_DEV_DIFFICULTY, next.dev.difficulty?.name ?: "")
+            .putString(KEY_DEV_OFF, next.dev.off.joinToString(","))
+            .putInt(KEY_DEV_BOSS, next.dev.boss)
+            .putString(KEY_DEV_TWEAKS, encodeTweaks(next.dev.tweaks))
             .putInt(KEY_DEV_STAGE, next.dev.startStage)
             .putInt(KEY_DEV_COINS, next.dev.startCoins)
             .putBoolean(KEY_DEV_INVINCIBLE, next.dev.invincible)
@@ -86,11 +111,13 @@ class SettingsStore(context: Context) {
         shotVibration = prefs.getBoolean(KEY_SHOT_VIBRATION, true),
         showStats = prefs.getBoolean(KEY_STATS, debuggable),
         showLink = prefs.getBoolean(KEY_LINK, true),
-        breakEvery = prefs.getInt(KEY_BREAK, 0).takeIf { it in BREAK_CHOICES } ?: 0,
+        breakEvery = prefs.getInt(KEY_BREAK, 0).coerceIn(0, MAX_BREAK_MINUTES),
         tutorialSeen = prefs.getBoolean(KEY_TUTORIAL, false),
         devUnlocked = prefs.getBoolean(KEY_DEV_UNLOCKED, false),
         dev = Dev(
-            difficulty = Difficulty.entries.firstOrNull { it.name == prefs.getString(KEY_DEV_DIFFICULTY, null) },
+            off = prefs.getString(KEY_DEV_OFF, null).orEmpty().split(',').mapNotNull { it.toIntOrNull() }.toSet(),
+            boss = prefs.getInt(KEY_DEV_BOSS, -1),
+            tweaks = decodeTweaks(prefs.getString(KEY_DEV_TWEAKS, null)),
             startStage = prefs.getInt(KEY_DEV_STAGE, 1).coerceIn(1, 99),
             startCoins = prefs.getInt(KEY_DEV_COINS, 0).coerceAtLeast(0),
             invincible = prefs.getBoolean(KEY_DEV_INVINCIBLE, false),
@@ -113,7 +140,9 @@ class SettingsStore(context: Context) {
         const val KEY_BREAK = "break_every"
         const val KEY_TUTORIAL = "tutorial_seen"
         const val KEY_DEV_UNLOCKED = "dev_unlocked"
-        const val KEY_DEV_DIFFICULTY = "dev_difficulty"
+        const val KEY_DEV_OFF = "dev_off"
+        const val KEY_DEV_BOSS = "dev_boss"
+        const val KEY_DEV_TWEAKS = "dev_tweaks"
         const val KEY_DEV_STAGE = "dev_stage"
         const val KEY_DEV_COINS = "dev_coins"
         const val KEY_DEV_INVINCIBLE = "dev_invincible"

@@ -30,7 +30,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import dev.david.tessel.core.content.Difficulty
-import dev.david.tessel.platform.store.BREAK_CHOICES
 import dev.david.tessel.platform.store.Settings
 import dev.david.tessel.platform.store.StickSize
 import dev.david.tessel.platform.update.UpdateState
@@ -57,6 +56,7 @@ fun SettingsScreen(
     onTutorial: () -> Unit = {},
     onDev: () -> Unit = {},
     onUnlockDev: () -> Unit = {},
+    onEditBreak: () -> Unit = {},
 ) {
     val c = Theme.colors
     Column(
@@ -151,13 +151,7 @@ fun SettingsScreen(
                         "After ${settings.breakEvery} minutes of play a card pauses the game. You can save and stop, or keep going. In a team it pauses everyone."
                     },
                 ) {
-                    Box(Modifier.padding(Space.x3)) {
-                        Segmented(
-                            options = BREAK_CHOICES.map { if (it == 0) "Off" else "$it min" },
-                            selected = BREAK_CHOICES.indexOf(settings.breakEvery).coerceAtLeast(0),
-                            onSelect = { i -> onChange { it.copy(breakEvery = BREAK_CHOICES[i]) } },
-                        )
-                    }
+                    ActionRow("Remind Every", if (settings.breakEvery == 0) "Off" else "${settings.breakEvery} min", onEditBreak)
                 }
 
                 Group("Help") {

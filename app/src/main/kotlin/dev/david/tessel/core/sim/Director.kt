@@ -39,6 +39,12 @@ class Director {
     private var outX = 0f
     private var outY = 0f
 
+    /**
+     * Developer option: when set, only the kinds marked true come in, from the
+     * first stage on, and nothing else is picked. Null leaves the usual order.
+     */
+    var allow: BooleanArray? = null
+
     fun startStage() {
         budget = HEAD_START
         type = -1
@@ -50,6 +56,7 @@ class Director {
         val bossScale = if (w.isBossStage()) Balance.BOSS_STAGE_SPAWNS else 1f
         budget += ratePerSecond(w.stage, w.stageProgress()) * w.difficulty.spawn * w.crowd() * bossScale * TICK_SECONDS
         if (type < 0) choose(w.rng, w.stage, t)
+        if (type < 0) return
         val cap = Balance.SOFT_CAP + Balance.SOFT_CAP_PER_PLAYER * (w.presentCount() - 1)
         if (budget < cost || w.enemies.count + size > cap) return
         place(w)
@@ -63,6 +70,8 @@ class Director {
     /** How likely [type] is to be picked at [seconds] into [stage]; 0 when it is not on offer yet. */
     fun weight(type: Int, stage: Int, seconds: Float): Float {
         val def = Bestiary.of(type)
+        val only = allow
+        if (only != null) return if (!def.boss && def.from != 0 && only[type]) def.weight else 0f
         return when {
             def.boss || def.from == 0 || def.from > stage -> 0f
             type == Bestiary.PIP && stage == 1 && seconds < PIPS_FROM -> 0f
@@ -74,6 +83,10 @@ class Director {
     private fun choose(rng: Rng, stage: Int, t: Float) {
         var total = 0f
         for (k in 0 until Bestiary.size) total += weight(k, stage, t)
+        if (total <= 0f) {
+            type = -1
+            return
+        }
         var roll = rng.nextFloat() * total
         type = Bestiary.DOT
         for (k in 0 until Bestiary.size) {

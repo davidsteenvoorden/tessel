@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.windowInsetsPadding
@@ -28,6 +29,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.width
 import dev.david.tessel.core.dev.DevAccess
@@ -40,6 +42,7 @@ import dev.david.tessel.platform.game.ShopView
 import dev.david.tessel.platform.net.CoopLobby
 import dev.david.tessel.platform.net.LobbyState
 import dev.david.tessel.platform.store.LedgerStore
+import dev.david.tessel.platform.store.MAX_BREAK_MINUTES
 import dev.david.tessel.platform.store.SettingsStore
 import dev.david.tessel.platform.store.SoloSaves
 import dev.david.tessel.platform.update.Updater
@@ -50,6 +53,8 @@ import dev.david.tessel.ui.components.Sheet
 import dev.david.tessel.ui.components.Text
 import dev.david.tessel.ui.screens.BreakPanel
 import dev.david.tessel.ui.screens.CodePanel
+import dev.david.tessel.ui.screens.MinutesPanel
+import dev.david.tessel.ui.screens.DevEnemiesScreen
 import dev.david.tessel.ui.screens.DevScreen
 import dev.david.tessel.ui.screens.HomeScreen
 import dev.david.tessel.ui.screens.LobbyScreen
@@ -103,6 +108,8 @@ fun TesselApp(
     var playOpen by remember { mutableStateOf(false) }
     var devOpen by rememberSaveable { mutableStateOf(false) }
     var codeOpen by remember { mutableStateOf(false) }
+    var minutesOpen by remember { mutableStateOf(false) }
+    var enemiesOpen by rememberSaveable { mutableStateOf(false) }
     // Seven taps on the version line, then a second of quiet, ask for the developer code.
     val taps = remember { TapCounter() }
     var tapSeq by remember { mutableIntStateOf(0) }
@@ -308,19 +315,25 @@ fun TesselApp(
             visible = onStart == null && !settings.tutorialSeen && mode == Mode.HOME && !settingsOpen && !lobbyOpen && !statsOpen && !playOpen,
             onDismiss = { store.update { it.copy(tutorialSeen = true) } },
         ) {
-            Column(Modifier.width(420.dp).padding(start = Space.x6, end = Space.x6, top = Space.x3, bottom = Space.x5)) {
-                Text("New to Tessel?", Type.title2, c.ink)
+            Column(
+                Modifier.fillMaxWidth().padding(start = Space.x6, end = Space.x6, top = Space.x3, bottom = Space.x5),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+              Column(Modifier.width(420.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("New to Tessel?", Type.title2, c.ink, align = TextAlign.Center)
                 Spacer(Modifier.height(Space.x1))
                 Text(
                     "A short practice shows the controls and how to dodge enemy shots. You can skip it and find it again under How to Play in Settings.",
                     Type.subhead,
                     c.ink2,
+                    align = TextAlign.Center,
                 )
                 Spacer(Modifier.height(Space.x4))
                 Row(horizontalArrangement = Arrangement.spacedBy(Space.x3)) {
                     SecondaryButton("Skip", { store.update { it.copy(tutorialSeen = true) } }, Modifier.weight(1f))
                     PrimaryButton("Start Tutorial", startTutorial, Modifier.weight(1f))
                 }
+              }
             }
         }
 
@@ -337,6 +350,7 @@ fun TesselApp(
                 onBack = { settingsOpen = false },
                 onTutorial = startTutorial,
                 onDev = { devOpen = true },
+                onEditBreak = { minutesOpen = true },
                 onUnlockDev = {
                     taps.tap()
                     tapSeq++
@@ -360,7 +374,33 @@ fun TesselApp(
                     game.breakNow()
                 },
                 onTutorial = startTutorial,
+                onEnemies = { enemiesOpen = true },
+                onStartRun = {
+                    devOpen = false
+                    settingsOpen = false
+                    game.startDevRun(settings.difficulty)
+                },
                 onBack = { devOpen = false },
+            )
+        }
+
+        AnimatedVisibility(
+            visible = settingsOpen && devOpen && enemiesOpen,
+            enter = slideInHorizontally(Springs.ui()) { it } + fadeIn(Springs.ui()),
+            exit = slideOutHorizontally(Springs.ui()) { it } + fadeOut(Springs.ui()),
+        ) {
+            DevEnemiesScreen(settings = settings, onChange = store::update, onBack = { enemiesOpen = false })
+        }
+
+        Sheet(visible = minutesOpen && settingsOpen, onDismiss = { minutesOpen = false }) {
+            MinutesPanel(
+                initial = settings.breakEvery,
+                max = MAX_BREAK_MINUTES,
+                onSet = { m ->
+                    store.update { it.copy(breakEvery = m) }
+                    minutesOpen = false
+                },
+                onCancel = { minutesOpen = false },
             )
         }
 
@@ -385,6 +425,8 @@ fun TesselApp(
     BackHandler(enabled = settingsOpen || lobbyOpen || statsOpen || playOpen || mode != Mode.HOME) {
         when {
             codeOpen -> codeOpen = false
+            minutesOpen -> minutesOpen = false
+            enemiesOpen && devOpen && settingsOpen -> enemiesOpen = false
             devOpen && settingsOpen -> devOpen = false
             settingsOpen -> settingsOpen = false
             statsOpen -> statsOpen = false

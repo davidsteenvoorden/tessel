@@ -33,7 +33,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
-import dev.david.tessel.core.content.Difficulty
+import dev.david.tessel.core.content.Bestiary
+import dev.david.tessel.ui.components.NavRow
+import dev.david.tessel.ui.components.PrimaryButton
 import dev.david.tessel.platform.dev.LogExport
 import dev.david.tessel.platform.store.DEV_SPEEDS
 import dev.david.tessel.platform.store.Dev
@@ -67,6 +69,8 @@ fun DevScreen(
     onChange: ((Settings) -> Settings) -> Unit,
     onBreakNow: () -> Unit,
     onTutorial: () -> Unit,
+    onEnemies: () -> Unit,
+    onStartRun: () -> Unit,
     onBack: () -> Unit,
 ) {
     val c = Theme.colors
@@ -94,19 +98,16 @@ fun DevScreen(
                 verticalArrangement = Arrangement.spacedBy(Space.x6),
             ) {
                 Group(
-                    "Solo Runs",
-                    footer = "Solo only. A team never gets these. A run that uses any of them is not saved, not counted and not in the logbook." +
-                        if (inRun) " Difficulty, invincibility, enemies and speed apply to the run in progress too; the rest from the next run." else "",
+                    "Solo Trial",
+                    footer = "These only reach a run started with Try a Run With These. Play on the home screen is always a normal run. A team never gets them. A trial run is not saved, not counted and not in the logbook.",
                 ) {
-                    Column(Modifier.padding(horizontal = Space.x4, vertical = Space.x3)) {
-                        Text("Difficulty", Type.body, c.ink)
-                        Spacer(Modifier.height(Space.x2))
-                        Segmented(
-                            options = listOf("Setting") + Difficulty.entries.map { it.label },
-                            selected = (dev.difficulty?.ordinal ?: -1) + 1,
-                            onSelect = { i -> change { it.copy(difficulty = if (i == 0) null else Difficulty.entries[i - 1]) } },
-                        )
-                    }
+                    val picked = (dev.off.size + (if (dev.boss >= 0) 1 else 0) + dev.tweaks.size)
+                    NavRow(
+                        "Enemies and Bosses",
+                        onEnemies,
+                        detail = if (picked == 0) "Pick which kinds come, a boss to fight, and change their speed, health and damage." else
+                            "${dev.off.size} off" + (if (dev.boss >= 0) ", boss: ${Bestiary.of(dev.boss).name}" else "") + ", ${dev.tweaks.size} changed",
+                    )
                     Divider()
                     Row(
                         Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = Space.x4, vertical = Space.x2),
@@ -146,6 +147,10 @@ fun DevScreen(
                             onSelect = { i -> change { it.copy(speed = DEV_SPEEDS[i]) } },
                         )
                     }
+                }
+
+                if (!inRun) {
+                    PrimaryButton("Try a Run With These", onStartRun, Modifier.fillMaxWidth())
                 }
 
                 Group("Tools", footer = exported) {

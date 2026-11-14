@@ -181,6 +181,9 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
     // Developer options for solo runs, and whether this run used any, which keeps it out of the records.
     @Volatile private var dev = Dev()
     private var cheating = false
+
+    /** The run in progress was started from the developer page; only then do the options reach it. */
+    private var devRun = false
     private var gameSpeed = 1f
 
     // Solo: the slot this run keeps itself in (-1 for none), and what this phone has met and beaten since the last flush.
@@ -215,19 +218,26 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
 
     // Commands from the menus and the lobby. Each one runs on the game thread, in order.
 
-    fun startRun(difficulty: Difficulty) = onGameThread { beginSolo(difficulty) }
+    /** A normal run: developer options stay out of it. */
+    fun startRun(difficulty: Difficulty) = onGameThread { beginSolo(difficulty, withDev = false) }
+
+    /** A trial run from the developer page, with its options on. */
+    fun startDevRun(difficulty: Difficulty) = onGameThread { beginSolo(difficulty, withDev = true) }
 
     /** A new solo run in a free slot. With every slot taken it does not start; the menus ask for one to be freed first. */
-    private fun beginSolo(difficulty: Difficulty) {
+    private fun beginSolo(difficulty: Difficulty, withDev: Boolean = false) {
         // A run that uses developer options goes into no save slot and no record.
-        val cheat = dev.active
+        val cheat = withDev && dev.active
         val slot = if (cheat) -1 else saves?.free() ?: 0
         if (!cheat && slot < 0) return
         dropCoop()
-        world.reset(players = 1, seed = SystemClock.elapsedRealtimeNanos(), difficulty = dev.difficulty ?: difficulty)
+        devRun = withDev
+        applyDev()
+        world.reset(players = 1, seed = SystemClock.elapsedRealtimeNanos(), difficulty = difficulty)
         if (cheat) {
             if (dev.startStage > 1) world.skipTo(dev.startStage)
             world.players.coins[0] = dev.startCoins
+            world.bringDevBoss()
         }
         soloSlot = slot
         markCheating(cheat)
@@ -301,17 +311,21 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
      * options only reach a solo run, and a run they touched is marked.
      */
     private fun applyDev(live: Boolean = false) {
-        val solo = playingAs == Role.SOLO && practice == null
+        val solo = playingAs == Role.SOLO && practice == null && devRun
         val d = if (solo) dev else Dev()
         world.invincible = d.invincible
         if (practice == null) world.spawning = !d.noSpawns
         gameSpeed = d.speed
-        if (!solo) return
-        val changesTheRun = d.invincible || d.noSpawns || d.speed != 1f || d.difficulty != null
-        if (live && current != Mode.HOME) {
-            d.difficulty?.let { world.difficulty = it }
-            if (changesTheRun && !cheating) markCheating(true)
+        for (k in 0 until Bestiary.size) {
+            val t = d.tweak(k)
+            world.devSpeed[k] = t.speed
+            world.devHealth[k] = t.health
+            world.devDamage[k] = t.damage
         }
+        world.devBoss = d.boss
+        world.devAllow(if (d.off.isEmpty()) null else BooleanArray(Bestiary.size) { it !in d.off })
+        if (!solo) return
+        if (live && current != Mode.HOME && d.changesTheRun && !cheating) markCheating(true)
     }
 
     /** Carries on the solo run kept in [slot]: in the shop it stopped at, or from the start. */
@@ -320,7 +334,6 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
         dropCoop()
         world.restore(saved.checkpoint, SystemClock.elapsedRealtimeNanos()) { it == HOST_PLAYER }
         soloSlot = slot
-        markCheating(dev.invincible || dev.noSpawns || dev.speed != 1f || dev.difficulty != null)
         applyDev()
         freshRun()
         if (world.phase == Phase.SHOP) {
@@ -1033,6 +1046,7 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
             world.spawning = true
         }
         markCheating(false)
+        devRun = false
         becomeRole(Role.SOLO)
     }
 

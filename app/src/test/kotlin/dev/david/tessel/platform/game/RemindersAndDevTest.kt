@@ -2,6 +2,8 @@ package dev.david.tessel.platform.game
 
 import androidx.activity.ComponentActivity
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onLast
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
@@ -19,7 +21,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
-import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -182,7 +183,7 @@ class RemindersAndDevTest {
     @Test
     fun resetPutsTheDeveloperOptionsBackToNormal() {
         launch(seen = true)
-        store.update { it.copy(devUnlocked = true, dev = Dev(difficulty = Difficulty.HARD, startStage = 12, invincible = true)) }
+        store.update { it.copy(devUnlocked = true, dev = Dev(off = setOf(0, 1), boss = 17, startStage = 12, invincible = true)) }
         openSettings()
         compose.onNodeWithText("Developer Options").performScrollTo().performClick()
         settle()
@@ -197,9 +198,64 @@ class RemindersAndDevTest {
         launch(seen = true)
         store.update { it.copy(devUnlocked = true, dev = Dev(startStage = 6, startCoins = 500, invincible = true)) }
         settle(300)
-        game.startRun(Difficulty.NORMAL)
+        game.startDevRun(Difficulty.NORMAL)
         waitForMode(Mode.PLAYING)
         Thread.sleep(200)
         assertTrue(saves.saves.value.isEmpty())
+    }
+
+    @Test
+    fun aNormalRunWithDeveloperOptionsOnIsSavedAsUsual() {
+        launch(seen = true)
+        store.update { it.copy(devUnlocked = true, dev = Dev(startStage = 6, invincible = true)) }
+        settle(300)
+        game.startRun(Difficulty.NORMAL)
+        waitForMode(Mode.PLAYING)
+        val until = System.currentTimeMillis() + 3_000
+        while (saves.saves.value.isEmpty() && System.currentTimeMillis() < until) Thread.sleep(10)
+        assertEquals(1, saves.saves.value.size)
+        assertEquals(1, saves.saves.value[0].checkpoint.nextStage)
+    }
+
+    @Test
+    fun theReminderIsTypedInMinutesAndOffTurnsItOff() {
+        launch(seen = true)
+        openSettings()
+        compose.onNodeWithText("Remind Every").performScrollTo().performClick()
+        settle()
+        compose.onNodeWithText("7").performClick()
+        compose.onNodeWithText("Set").performClick()
+        settle()
+        assertEquals(7, store.settings.value.breakEvery)
+        compose.onNodeWithText("Remind Every").performScrollTo().performClick()
+        settle()
+        compose.onNodeWithText("Off").performClick()
+        settle()
+        assertEquals(0, store.settings.value.breakEvery)
+    }
+
+    @Test
+    fun twoRunsSavedThroughThePauseMenuBothStay() {
+        launch(seen = true)
+        repeat(2) { n ->
+            settle(1000)
+            if (n == 0) compose.onNodeWithText("Play").performClick() else {
+                compose.onNodeWithText("Play").performClick()
+                settle()
+                compose.onAllNodesWithText("New Run").onLast().performClick()
+            }
+            waitForMode(Mode.PLAYING)
+            game.pause()
+            waitForMode(Mode.PAUSED)
+            settle()
+            compose.onNodeWithText("Save and Quit").performClick()
+            settle()
+            compose.onAllNodesWithText("Save and Quit").onLast().performClick()
+            waitForMode(Mode.HOME)
+            settle()
+            val until = System.currentTimeMillis() + 3_000
+            while (saves.saves.value.size < n + 1 && System.currentTimeMillis() < until) Thread.sleep(10)
+            assertEquals(n + 1, saves.saves.value.size)
+        }
     }
 }

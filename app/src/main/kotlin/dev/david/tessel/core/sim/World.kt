@@ -34,7 +34,6 @@ private const val CLEAR_TICKS = Balance.CLEAR_SECONDS * TICK_HZ
 private const val GRID_CELL = 48f
 private const val FLASH_TICKS = 3
 private const val HURT_TICKS = 8
-private const val KNOCK_DECAY = 0.86f
 private const val SEPARATION = 0.5f
 private const val MUZZLE = 1.3f
 private const val BULLET_MARGIN = 24f
@@ -97,6 +96,23 @@ class World(seed: Long = 1L) {
 
     /** Developer option: hits are felt and shown, but cost no health. */
     var invincible = false
+
+    // Developer options for single kinds: how fast, how tough, and how many health a hit from one takes.
+    val devSpeed = FloatArray(Bestiary.size) { 1f }
+    val devHealth = FloatArray(Bestiary.size) { 1f }
+    val devDamage = IntArray(Bestiary.size) { 1 }
+
+    /** A boss kind that comes in every stage, or -1 for the usual order. */
+    var devBoss = -1
+
+    fun devAllow(kinds: BooleanArray?) {
+        director.allow = kinds
+    }
+
+    /** Starts the chosen boss walking in at the start of a run. */
+    fun bringDevBoss() {
+        if (devBoss >= 0) bossDue = BOSS_DELAY_TICKS
+    }
 
     var tick = 0
         private set
@@ -332,7 +348,7 @@ class World(seed: Long = 1L) {
         shownBossHealth = bossHealth
     }
 
-    fun isBossStage() = stage % Bestiary.BOSS_EVERY == 0
+    fun isBossStage() = devBoss >= 0 || stage % Bestiary.BOSS_EVERY == 0
 
     /** Type of the boss on the field, or -1. */
     fun bossType(): Int = if (boss >= 0) enemies.type[boss] else shownBossType
@@ -342,7 +358,7 @@ class World(seed: Long = 1L) {
 
     fun spawnEnemy(type: Int, x: Float, y: Float): Int {
         val def = Bestiary.of(type)
-        val hp = if (def.boss) def.hp * bossHpScale() else def.hp * enemyHpScale()
+        val hp = (if (def.boss) def.hp * bossHpScale() else def.hp * enemyHpScale()) * devHealth[type]
         val i = enemies.add(nextId++, type, x, y, hp)
         if (i >= 0) brains.prepare(i)
         return i
@@ -492,7 +508,7 @@ class World(seed: Long = 1L) {
 
     private fun bringBoss() {
         val round = (stage / Bestiary.BOSS_EVERY - 1).coerceAtLeast(0)
-        val type = Bestiary.bossOrder[round % Bestiary.bossOrder.size]
+        val type = if (devBoss >= 0) devBoss else Bestiary.bossOrder[round % Bestiary.bossOrder.size]
         val r = Bestiary.of(type).radius
         val i = spawnEnemy(type, ARENA_W / 2f, -r - 8f)
         if (i >= 0) {
@@ -807,7 +823,10 @@ class World(seed: Long = 1L) {
         val pl = players
         val px = pl.x[p]
         val py = pl.y[p]
-        if (!practice && !invincible) pl.hp[p] -= 1
+        if (!practice && !invincible) {
+            val by = Cause.type(cause)
+            pl.hp[p] -= if (by in 0 until Bestiary.size) devDamage[by] else 1
+        }
         pl.taken[p]++
         pl.invuln[p] = INVULN_TICKS
         pl.hurt[p] = HURT_TICKS

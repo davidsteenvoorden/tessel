@@ -210,7 +210,6 @@ object Bestiary {
     const val BOSS_EVERY = 5
 
     val size get() = defs.size
-    val maxRadius = defs.maxOf { it.radius }
 
     /** Largest body the director sends; bosses are checked separately. */
     val maxRegularRadius = defs.filter { !it.boss }.maxOf { it.radius }

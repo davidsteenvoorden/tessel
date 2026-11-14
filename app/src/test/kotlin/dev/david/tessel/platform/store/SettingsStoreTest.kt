@@ -2,7 +2,6 @@ package dev.david.tessel.platform.store
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
-import dev.david.tessel.core.content.Difficulty
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -30,7 +29,7 @@ class SettingsStoreTest {
     @Test
     fun developerOptionsComeBackAndResetClearsThem() {
         val first = SettingsStore(context)
-        val dev = Dev(difficulty = Difficulty.IMPOSSIBLE, startStage = 20, startCoins = 5_000, invincible = true, noSpawns = true, speed = 2f)
+        val dev = Dev(off = setOf(3, 4), boss = 18, tweaks = mapOf(5 to Tweak(2f, 5f, 3)), startStage = 20, startCoins = 5_000, invincible = true, noSpawns = true, speed = 2f)
         first.update { it.copy(devUnlocked = true, dev = dev) }
         val again = SettingsStore(context)
         assertEquals(dev, again.settings.value.dev)
