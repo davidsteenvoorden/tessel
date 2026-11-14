@@ -333,6 +333,10 @@ internal class Brains(private val w: World) {
             Bestiary.LANCER -> lancer(i, def, target, scale, rate, phase)
             Bestiary.APIARY -> apiary(i, def, target, scale, rate, phase)
             Bestiary.GYRE -> gyre(i, def, target, scale, rate, phase)
+            Bestiary.RAMPART -> rampart(i, def, target, scale, rate, phase)
+            Bestiary.PENDULUM -> pendulum(i, def, target, scale, rate, phase)
+            Bestiary.LATTICE -> lattice(i, def, target, scale, rate, phase)
+            Bestiary.SOWER -> sower(i, def, target, scale, rate, phase)
         }
         val charging = e.type[i] == Bestiary.LANCER && e.mode[i] == LANCE_CHARGE
         if (!charging) keepIn(i, def.radius)
@@ -479,6 +483,83 @@ internal class Brains(private val w: World) {
         }
     }
 
+    /** Walls of shots from the top, and from the left in the later phases, each with a gap to slip through. */
+    private fun rampart(i: Int, def: EnemyDef, target: Int, scale: Float, rate: Float, phase: Int) {
+        val e = w.enemies
+        chase(i, target, def.speed * scale * 0.5f)
+        if (e.timer[i] > 0) e.timer[i]--
+        e.cue[i] = if (e.timer[i] < TELL_TICKS) 1f - e.timer[i] / TELL_TICKS.toFloat() else 0f
+        if (e.timer[i] > 0) return
+        e.timer[i] = seconds((if (phase == 1) 3.4f else if (phase == 2) 2.8f else 2.3f) / rate)
+        e.aux[i] += 1f
+        val fromTop = phase == 3 || phase == 1 || e.aux[i].toInt() % 2 == 0
+        val fromSide = phase == 3 || (phase == 2 && !fromTop)
+        if (fromTop) {
+            val slots = 16
+            val gap = w.rng.int(0, slots - 4)
+            for (k in 0 until slots) {
+                if (k - gap in 0..2) continue
+                w.spawnHostile((k + 0.5f) * ARENA_W / slots, 0f, HALF_PI, 160f, shooter)
+            }
+        }
+        if (fromSide) {
+            val slots = 8
+            val gap = w.rng.int(0, slots - 3)
+            for (k in 0 until slots) {
+                if (k - gap in 0..1) continue
+                w.spawnHostile(0f, (k + 0.5f) * ARENA_H / slots, 0f, 160f, shooter)
+            }
+        }
+    }
+
+    /** Circles the arena, firing at the player on the way past; faster and wider with each phase. */
+    private fun pendulum(i: Int, def: EnemyDef, target: Int, scale: Float, rate: Float, phase: Int) {
+        val e = w.enemies
+        val turn = (if (phase == 1) 0.5f else if (phase == 2) 0.8f else 1.1f) * TICK_SECONDS
+        val dir = if (e.modeTicks[i] / seconds(6f) % 2 == 0) 1f else -1f
+        e.aux[i] = wrap(e.aux[i] + dir * turn)
+        seek(i, ARENA_W / 2f + cos(e.aux[i]) * 520f, ARENA_H / 2f + sin(e.aux[i]) * 230f, def.speed * scale * 1.8f)
+        if (e.timer[i] > 0) e.timer[i]--
+        e.cue[i] = if (e.timer[i] < TELL_TICKS) 1f - e.timer[i] / TELL_TICKS.toFloat() else 0f
+        if (e.timer[i] <= 0 && target >= 0) {
+            e.timer[i] = seconds(1.1f / rate)
+            val n = if (phase == 1) 2 else if (phase == 2) 3 else 5
+            fan(e.x[i], e.y[i], angleTo(i, target), n, if (phase == 3) 0.26f else 0.16f, 200f, def.radius)
+        }
+        if (phase >= 2 && e.modeTicks[i] % seconds(4f) == 0) ring(e.x[i], e.y[i], 8, e.aux[i], 150f, def.radius)
+    }
+
+    /** Three beats of streaming shots along a plus, then along a cross; later both together and turning. */
+    private fun lattice(i: Int, def: EnemyDef, target: Int, scale: Float, rate: Float, phase: Int) {
+        val e = w.enemies
+        chase(i, target, def.speed * scale * 0.6f)
+        if (e.timer[i] > 0) e.timer[i]--
+        e.cue[i] = if (e.timer[i] < TELL_TICKS) 1f - e.timer[i] / TELL_TICKS.toFloat() else 0f
+        if (e.timer[i] > 0) return
+        e.timer[i] = seconds((if (phase == 3) 1.2f else 1.7f) / rate)
+        e.aux[i] += 1f
+        val n = if (phase == 1) 4 else 8
+        val offset = (if (e.aux[i].toInt() % 2 == 0) 0f else HALF_PI / 2f) + (if (phase == 3) e.aux[i] * 0.18f else 0f)
+        for (speed in LATTICE_SPEEDS) ring(e.x[i], e.y[i], n, offset, speed, def.radius)
+    }
+
+    /** Chases and leaves slow shots in its wake; bursts rings outward, and fires at the player at the end. */
+    private fun sower(i: Int, def: EnemyDef, target: Int, scale: Float, rate: Float, phase: Int) {
+        val e = w.enemies
+        chase(i, target, def.speed * scale * 0.8f)
+        if (e.timer[i] > 0) e.timer[i]--
+        if (e.timer[i] <= 0) {
+            e.timer[i] = seconds(0.5f / rate)
+            w.spawnHostile(e.x[i], e.y[i], w.rng.range(0f, TWO_PI), 35f, shooter)
+        }
+        val every = seconds(if (phase == 2) 4f else 3f)
+        e.cue[i] = if (phase >= 2 && every - e.modeTicks[i] % every < TELL_TICKS) 1f - (every - e.modeTicks[i] % every) / TELL_TICKS.toFloat() else 0f
+        if (phase >= 2 && e.modeTicks[i] % every == 0) ring(e.x[i], e.y[i], 12, w.rng.range(0f, TWO_PI), 150f, def.radius)
+        if (phase == 3 && target >= 0 && e.modeTicks[i] % seconds(2f) == 0) {
+            fan(e.x[i], e.y[i], angleTo(i, target), 3, 0.22f, 190f, def.radius)
+        }
+    }
+
     private fun fan(x: Float, y: Float, aim: Float, n: Int, spread: Float, speed: Float, r: Float) {
         for (k in 0 until n) shoot(x, y, aim + (k - (n - 1) / 2f) * spread, speed, r)
     }
@@ -541,6 +622,8 @@ internal class Brains(private val w: World) {
     }
 
     private companion object {
+        const val HALF_PI = (PI / 2).toFloat()
+        val LATTICE_SPEEDS = floatArrayOf(120f, 155f, 190f)
         const val LANCE_HOVER = 1
         const val LANCE_WINDUP = 2
         const val LANCE_CHARGE = 3

@@ -99,6 +99,10 @@ object Bestiary {
     const val LANCER = 18
     const val APIARY = 19
     const val GYRE = 20
+    const val RAMPART = 21
+    const val PENDULUM = 22
+    const val LATTICE = 23
+    const val SOWER = 24
 
     private val defs = arrayOf(
         EnemyDef(
@@ -202,10 +206,26 @@ object Bestiary {
             "Gyre", Shape.STAR, radius = 48f, hp = 900f, speed = 40f, mass = 60f, cost = 0f, coins = 60, hue = 212, tone = -1,
             move = Move.BOSS, boss = true, blurb = "Spirals that change direction. Keep moving with them.",
         ),
+        EnemyDef(
+            "Rampart", Shape.SQUARE, radius = 48f, hp = 1100f, speed = 38f, mass = 60f, cost = 0f, coins = 70, hue = 104, tone = -1,
+            move = Move.BOSS, boss = true, blurb = "Sends walls of shots across the arena. Find the gap.",
+        ),
+        EnemyDef(
+            "Pendulum", Shape.DIAMOND, radius = 38f, hp = 1350f, speed = 120f, mass = 50f, cost = 0f, coins = 80, hue = 172, tone = -1,
+            move = Move.BOSS, boss = true, blurb = "Swings round the arena and fires as it passes.",
+        ),
+        EnemyDef(
+            "Lattice", Shape.CROSS, radius = 46f, hp = 1600f, speed = 30f, mass = 60f, cost = 0f, coins = 90, hue = 237, tone = -1,
+            move = Move.BOSS, boss = true, spin = 0.2f, blurb = "Streams of shots along a plus, then a cross. Stand between the lines.",
+        ),
+        EnemyDef(
+            "Sower", Shape.PENTAGON, radius = 42f, hp = 2000f, speed = 70f, mass = 60f, cost = 0f, coins = 100, hue = 112, tone = -1,
+            move = Move.BOSS, boss = true, spin = 0.3f, blurb = "Leaves slow shots behind it and bursts them outward.",
+        ),
     )
 
     /** Bosses in the order they appear, every [BOSS_EVERY] stages, then round again. */
-    val bossOrder = intArrayOf(HEXARCH, LANCER, APIARY, GYRE)
+    val bossOrder = intArrayOf(HEXARCH, LANCER, APIARY, GYRE, RAMPART, PENDULUM, LATTICE, SOWER)
 
     const val BOSS_EVERY = 5
 

@@ -32,7 +32,11 @@ class BossTest {
         assertEquals(Bestiary.LANCER, bossAt(10).bossType())
         assertEquals(Bestiary.APIARY, bossAt(15).bossType())
         assertEquals(Bestiary.GYRE, bossAt(20).bossType())
-        assertEquals(Bestiary.HEXARCH, bossAt(25).bossType())
+        assertEquals(Bestiary.RAMPART, bossAt(25).bossType())
+        assertEquals(Bestiary.PENDULUM, bossAt(30).bossType())
+        assertEquals(Bestiary.LATTICE, bossAt(35).bossType())
+        assertEquals(Bestiary.SOWER, bossAt(40).bossType())
+        assertEquals(Bestiary.HEXARCH, bossAt(5 * Bestiary.bossOrder.size + 5).bossType())
         assertEquals(-1, bossAt(6).bossType())
     }
 
@@ -139,6 +143,30 @@ class BossTest {
             }
             assertTrue(w.enemies.count <= MAX_ENEMIES)
             assertFalse(w.over)
+        }
+    }
+
+    @Test
+    fun theNewBossesFireInEveryPhaseWithoutTroubleAndCanBeBeaten() {
+        for (type in listOf(Bestiary.RAMPART, Bestiary.PENDULUM, Bestiary.LATTICE, Bestiary.SOWER)) {
+            val w = World(seed = 9)
+            w.reset(players = 1, seed = 9)
+            w.spawning = false
+            w.invincible = true
+            val inputs = arrayOf(PlayerInput())
+            val i = w.spawnEnemy(type, ARENA_W / 2f, 100f)
+            var shots = 0
+            for (phaseHealth in listOf(1f, 0.5f, 0.2f)) {
+                w.enemies.hp[i] = w.enemies.maxHp[i] * phaseHealth
+                repeat(14 * TICK_HZ) {
+                    w.step(inputs)
+                    shots = maxOf(shots, w.hostile.count)
+                }
+            }
+            assertTrue("$type fired", shots > 0)
+            assertTrue(w.hostile.count <= MAX_HOSTILE)
+            w.enemies.hp[0] = 0f
+            repeat(5) { w.step(inputs) }
         }
     }
 }

@@ -168,6 +168,17 @@ fun SettingsScreen(
                         NavRow("Developer Options", onDev)
                     }
                 }
+                Group(
+                    "Credits",
+                    footer = "Built with Android, Jetpack Compose (Apache License 2.0) and Google's Nearby Connections for finding nearby phones. " +
+                        "Every enemy, boss, shape and icon in the game is original and drawn in code. There is no sound.",
+                ) {
+                    Column(Modifier.padding(horizontal = Space.x4, vertical = Space.x3), verticalArrangement = Arrangement.spacedBy(Space.x1)) {
+                        Text("Tessel", Type.headline, c.ink)
+                        Text("A personal project by David Steenvoorden.", Type.body, c.ink2)
+                        Text("Built together with Claude Code.", Type.body, c.ink2)
+                    }
+                }
                 Spacer(Modifier.height(Space.x4))
             }
         }
