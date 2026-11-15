@@ -1108,7 +1108,7 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
             offers += ShopOffer(
                 slot = slot,
                 name = def.name,
-                blurb = def.blurb,
+                blurb = Upgrades.blurb(u, s.levelsBought(world, me, slot)),
                 level = pl.levels[me][u],
                 maxLevel = def.maxLevel,
                 price = s.price(world, me, slot),
@@ -1168,7 +1168,7 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
             offers += ShopOffer(
                 slot = slot,
                 name = def.name,
-                blurb = def.blurb,
+                blurb = Upgrades.blurb(u, if (s.shopRare[slot]) minOf(3, def.maxLevel - s.shopLevel[slot]) else 1),
                 level = s.shopLevel[slot],
                 maxLevel = def.maxLevel,
                 price = s.shopPrice[slot],

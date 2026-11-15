@@ -2,6 +2,7 @@ package dev.david.tessel.ui.screens
 
 import android.view.HapticFeedbackConstants
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -22,6 +23,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
@@ -81,6 +83,7 @@ fun ShopPanel(
                     Tile(
                         name = offer.name,
                         blurb = offer.blurb,
+                        tint = c.perk,
                         enabled = true,
                         faded = false,
                         onClick = {
@@ -144,7 +147,8 @@ private fun OfferTile(offer: ShopOffer, modifier: Modifier, onBuy: () -> Unit) {
     val c = Theme.colors
     Tile(
         name = if (offer.rare) "Rare ${offer.name}" else offer.name,
-        blurb = if (offer.rare) "+${offer.levels} levels in one buy" else offer.blurb,
+        blurb = if (offer.rare) "${offer.blurb} (${offer.levels} levels)" else offer.blurb,
+        tint = if (offer.rare) c.rare else null,
         enabled = offer.affordable,
         faded = offer.maxed,
         onClick = onBuy,
@@ -189,6 +193,7 @@ private fun HealTile(shop: ShopView, modifier: Modifier, onHeal: () -> Unit) {
 private fun Tile(
     name: String,
     blurb: String,
+    tint: Color? = null,
     enabled: Boolean,
     faded: Boolean,
     onClick: () -> Unit,
@@ -200,15 +205,16 @@ private fun Tile(
     Column(
         modifier
             .pressScale(source, enabled)
-            .height(100.dp)
+            .height(112.dp)
             .alpha(if (faded) 0.45f else 1f)
             .clip(RoundedCornerShape(Corner.button))
             .background(if (c.dark) c.raised else c.ground)
+            .then(if (tint != null) Modifier.border(2.dp, tint, RoundedCornerShape(Corner.button)) else Modifier)
             .clickable(source, indication = null, enabled = enabled, role = Role.Button, onClick = onClick)
             .padding(horizontal = Space.x3, vertical = 10.dp),
     ) {
-        Text(name, Type.headline, c.ink, maxLines = 1)
-        Text(blurb, Type.footnote, c.ink2, maxLines = 2)
+        Text(name, Type.headline, tint ?: c.ink, maxLines = 1)
+        Text(blurb, Type.footnote, c.ink2, maxLines = 3)
         Spacer(Modifier.weight(1f))
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, content = footer)
     }

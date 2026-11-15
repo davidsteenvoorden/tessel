@@ -163,4 +163,37 @@ class PerksAndElitesTest {
         assertEquals(cp.perks[0], back.perks[0])
         assertEquals(cp.perkOffer[0].toList(), back.perkOffer[0].toList())
     }
+
+    @Test
+    fun coinsInATeamAreSharedEvenly() {
+        val w = World(seed = 3)
+        w.reset(players = 3, seed = 3)
+        w.spawning = false
+        // Every coin is picked up by player 0.
+        repeat(40) {
+            w.coins.add(100 + it, w.players.x[0], w.players.y[0], 0f, 0f, 7)
+            repeat(3) { w.step(arrayOf(PlayerInput(), PlayerInput(), PlayerInput())) }
+        }
+        val total = w.players.coins.take(3).sum()
+        assertEquals(40 * 7, total)
+        val spread = w.players.coins.take(3).max() - w.players.coins.take(3).min()
+        assertTrue("within one coin of each other, was $spread", spread <= 1)
+    }
+
+    @Test
+    fun aBossCannotBeHurtWhileItWalksIn() {
+        val w = world()
+        val b = w.spawnEnemy(Bestiary.HEXARCH, 800f, -40f)
+        val hp = w.enemies.hp[b]
+        w.bullets.add(1, 800f, -40f, 0f, 1f, 30, 50f, 30f, 0, 0)
+        repeat(3) { w.step(inputs) }
+        assertEquals(hp, w.enemies.hp[b], 0.001f)
+    }
+
+    @Test
+    fun rareCardsDescribeTheirFullEffect() {
+        assertEquals("+45% damage per bullet", Upgrades.blurb(Upgrades.DAMAGE, 3))
+        assertEquals("Three more bullets per shot", Upgrades.blurb(Upgrades.MULTISHOT, 3))
+        assertEquals(Upgrades.of(Upgrades.SPEED).blurb, Upgrades.blurb(Upgrades.SPEED, 1))
+    }
 }

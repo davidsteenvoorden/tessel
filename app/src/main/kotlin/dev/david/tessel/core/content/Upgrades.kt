@@ -42,6 +42,31 @@ object Upgrades {
 
     val count get() = defs.size
 
+    /** What [levels] levels bought together add, for a rare upgrade's card. */
+    fun blurb(id: Int, levels: Int): String {
+        if (levels <= 1) return defs[id].blurb
+        val pct = { step: Float -> "+${(step * 100 * levels).roundToInt()}%" }
+        val more = when (levels) {
+            2 -> "Two"
+            3 -> "Three"
+            else -> "$levels"
+        }
+        return when (id) {
+            DAMAGE -> "${pct(defs[id].step)} damage per bullet"
+            FIRE_RATE -> "${pct(defs[id].step)} shots per second"
+            MULTISHOT -> "$more more bullets per shot"
+            VELOCITY -> "${pct(defs[id].step)} bullet speed"
+            PIERCE -> "Bullets go through ${more.lowercase()} more enemies"
+            RANGE -> "${pct(defs[id].step)} bullet range"
+            SPEED -> "${pct(defs[id].step)} move speed"
+            MAX_HEALTH -> "$more more health pips, filled"
+            WEALTH -> "${pct(defs[id].step)} coin value"
+            MAGNET -> "${pct(defs[id].step)} coin pickup reach"
+            CALIBER -> "${pct(defs[id].step)} bullet size"
+            else -> defs[id].blurb
+        }
+    }
+
     fun of(id: Int) = defs[id]
 
     /**

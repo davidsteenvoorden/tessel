@@ -12,6 +12,8 @@ New kinds of enemy keep turning up as the stages go by: ones that keep their dis
 
 From stage 6 some enemies are elites, wearing a gold ring: armored ones take half damage, fast ones run at you, splitting ones leave Pips behind and bursting ones fire a ring when they break. They have more health and pay more coins and score, and now and then one drops a surge, a few seconds of faster and harder shots. After each boss you choose one of three perks, such as Second Wind, Siphon or Shockwave, which last the rest of the run. From stage 4 the shop sometimes sells a rare upgrade: three levels in one buy at a higher price.
 
+Bosses cannot be hurt while they walk in, only once they start attacking.
+
 Stage 5 brings the first boss, and another follows every five stages. There are eight, each with its own way of attacking, and after the eighth the line starts over with tougher versions.
 
 Pausing shows the run so far beside the menu: kills, damage, shots, coins, hits taken and upgrades. In a team it is a table with a column per player, and whoever leads a row that is worth winning stands out. The same numbers come up when the run ends.
@@ -34,7 +36,7 @@ There are four difficulties. Easy is for your first runs: slower and softer enem
 
 One phone taps Host and gets a four-letter code. The others tap Join and pick that code from the list. If your phones have NFC, the host can simply hold each friend's phone back to back with theirs and it joins on its own (Tessel has to be open on the friend's phone).
 
-The phones find each other and pair using Google's Nearby Connections, so they need Google Play services, and Bluetooth and Wi-Fi switched on. Wi-Fi does not have to be connected to a network. More players means more enemies, and bosses with more health.
+The phones find each other and pair using Google's Nearby Connections, so they need Google Play services, and Bluetooth and Wi-Fi switched on. Wi-Fi does not have to be connected to a network. More players means more enemies, and bosses with more health. Coins are shared out evenly: whoever walks into one, everyone in the team gets the same amount.
 
 Once a game starts, if the phones are on the same Wi-Fi network (at home, or one phone's hotspot), they stop going through Nearby and talk straight to each other over that network. That is several times quicker, because Nearby adds its own delay to every message. If the direct link drops, they carry on through Nearby and try the direct link again a few seconds later. Nothing leaves your network.
 

@@ -123,14 +123,14 @@ class EnemyTest {
     }
 
     @Test
-    fun aPickupFromAnotherPhoneGoesToThatPlayer() {
+    fun aPickupFromAnotherPhoneIsSharedAndCountsOnce() {
         world.reset(players = 2, seed = 12)
         world.spawning = false
         val i = world.coins.add(77_777, 300f, 300f, 0f, 0f, 5)
         world.remotePickup(1, world.coins.id[i] and 0xFFFF)
-        assertEquals(5, world.players.coins[1])
+        assertEquals(5, world.players.coins[0] + world.players.coins[1])
         world.remotePickup(1, 77_777 and 0xFFFF)
-        assertEquals("only once", 5, world.players.coins[1])
+        assertEquals("only once", 5, world.players.coins[0] + world.players.coins[1])
     }
 
     @Test

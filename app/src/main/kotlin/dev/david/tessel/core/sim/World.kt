@@ -447,8 +447,7 @@ class World(seed: Long = 1L) {
         val c = coins
         for (i in 0 until c.count) {
             if (c.id[i] and 0xFFFF != id16 || c.value[i] <= 0) continue
-            players.coins[p] += c.value[i]
-            players.earned[p] += c.value[i]
+            credit(p, c.value[i])
             events.add(Events.COIN, p, c.x[i], c.y[i])
             c.value[i] = 0
             return
@@ -746,6 +745,8 @@ class World(seed: Long = 1L) {
     private fun damageEnemy(j: Int, damage: Float, ux: Float, uy: Float, owner: Int) {
         val e = enemies
         val def = Bestiary.of(e.type[j])
+        // A boss cannot be hurt while it walks in, or while the Gyre takes its place, until it starts attacking.
+        if (def.boss && (e.mode[j] == 0 || (e.type[j] == Bestiary.GYRE && e.mode[j] == 1))) return
         val shielded = e.type[j] == Bestiary.APIARY && brains.escorts > 0
         val armored = e.elite[j] == Elite.ARMORED
         val dealt = damage * (if (shielded) SHIELDED_DAMAGE else 1f) * (if (armored) Elite.ARMOR else 1f)
@@ -976,8 +977,7 @@ class World(seed: Long = 1L) {
                 val dy = pl.y[t] - c.y[i]
                 val d = sqrt(dx * dx + dy * dy)
                 if (d < pickup) {
-                    pl.coins[t] += c.value[i]
-                    pl.earned[t] += c.value[i]
+                    credit(t, c.value[i])
                     events.add(Events.COIN, t, c.x[i], c.y[i])
                     c.value[i] = 0
                     continue
@@ -992,6 +992,39 @@ class World(seed: Long = 1L) {
             val cr = Balance.COIN_RADIUS
             c.x[i] = (c.x[i] + c.vx[i] * TICK_SECONDS).coerceIn(cr, ARENA_W - cr)
             c.y[i] = (c.y[i] + c.vy[i] * TICK_SECONDS).coerceIn(cr, ARENA_H - cr)
+        }
+    }
+
+    /** Where the odd coin goes next when a pickup does not divide evenly. */
+    private var shareTurn = 0
+
+    /**
+     * Coins picked up in a team are shared out evenly between everyone still in
+     * the game, whoever walked into them. What does not divide goes round the
+     * team one coin at a time, so over a stage nobody falls behind.
+     */
+    private fun credit(p: Int, value: Int) {
+        val pl = players
+        val n = presentCount()
+        if (n <= 1) {
+            pl.coins[p] += value
+            pl.earned[p] += value
+            return
+        }
+        val each = value / n
+        var rest = value - each * n
+        for (q in 0 until playerCount) {
+            if (!pl.present[q]) continue
+            pl.coins[q] += each
+            pl.earned[q] += each
+        }
+        while (rest > 0) {
+            val q = shareTurn % playerCount
+            shareTurn++
+            if (!pl.present[q]) continue
+            pl.coins[q]++
+            pl.earned[q]++
+            rest--
         }
     }
 

@@ -34,6 +34,9 @@ class Colors(
     /** The zone 1 teal, used only for the mark on the home screen. */
     val accent: Color,
     val accentFacet: Color,
+    /** Cards for perks and for rare upgrades, so they stand out from the plain shop items. */
+    val perk: Color,
+    val rare: Color,
 )
 
 fun Palette.toColors(): Colors {
@@ -53,6 +56,8 @@ fun Palette.toColors(): Colors {
         line = Color(mix(surface, ink, 0.12f)),
         accent = Color(zone),
         accentFacet = Color(if (dark) mix(zone, WHITE, 0.32f) else mix(zone, ground, 0.35f)),
+        perk = Color(enemy(205, 0)),
+        rare = Color(enemy(300, 0)),
     )
 }
 

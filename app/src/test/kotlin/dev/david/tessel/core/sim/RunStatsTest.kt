@@ -62,6 +62,8 @@ class RunStatsTest {
     fun aBeatenBossCountsForTheTeam() {
         val boss = world.spawnEnemy(Bestiary.bossOrder[0], 800f, 300f)
         world.enemies.hp[boss] = 0.5f
+        // Past its entrance, when it starts attacking, a boss can be hurt.
+        world.enemies.mode[boss] = 1
         world.remoteHit(1, world.enemies.id[boss] and 0xFFFF, 1f, 0f)
         assertEquals(1, world.bossesDown)
     }
