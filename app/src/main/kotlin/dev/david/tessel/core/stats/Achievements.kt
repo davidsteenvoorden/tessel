@@ -19,7 +19,23 @@ class Achievement(
 /** Every goal, grouped by how far off it is. Counters step up so there is always a next one. */
 object Achievements {
     private fun best(l: Ledger, d: Difficulty) = l.bestOn(d)?.stage ?: 0
-    private fun coop(l: Ledger) = l.runs.filter { it.players > 1 }
+    private fun coopRuns(l: Ledger): Int {
+        var n = 0
+        for (r in l.runs) if (r.players > 1) n++
+        return n
+    }
+
+    private fun coopDeepest(l: Ledger): Int {
+        var best = 0
+        for (r in l.runs) if (r.players > 1 && r.stage > best) best = r.stage
+        return best
+    }
+
+    private fun finished(l: Ledger, d: Difficulty): Int {
+        var n = 0
+        for (r in l.runs) if (r.won && r.difficulty == d) n++
+        return n
+    }
     private fun bossesMet(l: Ledger) = Bestiary.bossOrder.count { l.defeated[it] > 0 }
 
     private fun a(name: String, tier: Tier, text: String, target: Int, progress: (Ledger) -> Int) =
@@ -76,14 +92,14 @@ object Achievements {
         a("Pull Up", Tier.EASY, "Revive a teammate.", 1) { it.totals.revives },
         a("Field Medic", Tier.MEDIUM, "Revive 25 teammates.", 25) { it.totals.revives },
         a("Guardian", Tier.HARD, "Revive 100 teammates.", 100) { it.totals.revives },
-        a("Better Together", Tier.EASY, "Finish a co-op run.", 1) { coop(it).size },
-        a("Regular Squad", Tier.MEDIUM, "Finish 10 co-op runs.", 10) { coop(it).size },
-        a("Deep Together", Tier.HARD, "Reach stage 15 in co-op.", 15) { l -> coop(l).maxOfOrNull { it.stage } ?: 0 },
+        a("Better Together", Tier.EASY, "Finish a co-op run.", 1) { coopRuns(it) },
+        a("Regular Squad", Tier.MEDIUM, "Finish 10 co-op runs.", 10) { coopRuns(it) },
+        a("Deep Together", Tier.HARD, "Reach stage 15 in co-op.", 15) { coopDeepest(it) },
 
         // The last boss
         a("Core Breaker", Tier.LEGENDARY, "Beat the Core and complete a run.", 1) { it.totals.completed },
-        a("Hard Finish", Tier.LEGENDARY, "Complete a run on Hard.", 1) { l -> l.runs.count { it.won && it.difficulty == Difficulty.HARD } },
-        a("Impossible Finish", Tier.LEGENDARY, "Complete a run on Impossible.", 1) { l -> l.runs.count { it.won && it.difficulty == Difficulty.IMPOSSIBLE } },
+        a("Hard Finish", Tier.LEGENDARY, "Complete a run on Hard.", 1) { finished(it, Difficulty.HARD) },
+        a("Impossible Finish", Tier.LEGENDARY, "Complete a run on Impossible.", 1) { finished(it, Difficulty.IMPOSSIBLE) },
         a("Repeat Customer", Tier.LEGENDARY, "Complete 5 runs.", 5) { it.totals.completed },
 
         // Duels
@@ -91,6 +107,9 @@ object Achievements {
         a("Rival", Tier.MEDIUM, "Win 10 duels.", 10) { it.totals.pvpWins },
         a("Undisputed", Tier.HARD, "Win 50 duels.", 50) { it.totals.pvpWins },
     )
+
+    /** The goals of each tier, in order, worked out once. */
+    val byTier: Map<Tier, List<Achievement>> = Tier.entries.associateWith { t -> all.filter { it.tier == t } }
 
     fun doneCount(l: Ledger) = all.count { it.done(l) }
 }

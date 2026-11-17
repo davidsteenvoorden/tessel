@@ -312,7 +312,7 @@ class ClientSession(val me: Int, private var players: Int, private val send: (By
 
         val v = view
         val stageTicks = from.stageTicks + (to.stageTicks - from.stageTicks) * t
-        v.adopt(floor(renderTick).toInt().coerceAtLeast(0), top.stage, top.phase, stageTicks.toInt(), top.playerCount, top.difficulty, top.bossType, top.bossHealth, top.bossHp, top.bossMax)
+        v.adopt(floor(renderTick).toInt().coerceAtLeast(0), top.stage, top.phase, stageTicks.toInt(), top.playerCount, top.difficulty, top.bossType, top.bossHealth)
 
         val dv = v.duel
         dv.on = top.duel

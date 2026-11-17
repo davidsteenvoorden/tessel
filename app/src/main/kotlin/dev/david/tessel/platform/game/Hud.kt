@@ -324,12 +324,6 @@ class Hud(private val density: Float, fontScale: Float) {
         }
         val filled = width * share
         if (filled > height) canvas.drawRoundRect(left, top, left + filled, top + height, round, round, fill)
-        // A boss's health in points, under its bar.
-        if (boss >= 0 && w.bossMaxHp() > 0) {
-            buf.clear().putGrouped(w.bossHp()).put(" / ").putGrouped(w.bossMaxHp())
-            note.color = palette.ink2
-            canvas.drawText(buf.chars, 0, buf.length, cx, top + height + 15f * density, note)
-        }
 
         if (w.playerCount > 1 && !w.duel.on) {
             val pl = w.players

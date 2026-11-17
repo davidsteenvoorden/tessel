@@ -294,7 +294,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.achievements(ledger: 
         )
     }
     for (tier in Tier.entries) {
-        val list = Achievements.all.filter { it.tier == tier }
+        val list = Achievements.byTier.getValue(tier)
         val done = list.count { it.done(ledger) }
         item {
             Text(

@@ -164,13 +164,15 @@ class Renderer(private val density: Float, palette: Palette) {
         val cols = (ARENA_W / cell).toInt() + 1
         val rows = (ARENA_H / cell).toInt() + 1
         for (r in 0 until rows) {
-            for (c in 0 until cols) {
-                if ((r + c) and 1 != core.strikeParity) continue
+            // Only every other square is lit, so start on the right one and skip the rest.
+            var c = (core.strikeParity - r) and 1
+            while (c < cols) {
                 val x0 = view.screenX(c * cell)
                 val y0 = view.screenY(r * cell)
                 val x1 = view.screenX(minOf((c + 1) * cell, ARENA_W))
                 val y1 = view.screenY(minOf((r + 1) * cell, ARENA_H))
                 canvas.drawRect(x0, y0, x1, y1, paint)
+                c += 2
             }
         }
         if (warn) paint.alpha = 255
