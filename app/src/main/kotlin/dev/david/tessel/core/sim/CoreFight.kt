@@ -294,13 +294,6 @@ class CoreFight(private val w: World) {
         return k >= 0 && slotState[k] == DOCKED
     }
 
-    /** True for a boss that is flying home to be mended. */
-    private fun returning(i: Int): Boolean {
-        val e = w.enemies
-        val k = slotOf(e.id[i])
-        return k >= 0 && slotState[k] == RETURN
-    }
-
     /**
      * Runs before a borrowed boss thinks. Returns true when it should skip
      * its own routine: it is in its bubble, or on its way back to one.

@@ -188,6 +188,8 @@ class World(seed: Long = 1L) {
     /** On a client, the host's word for the boss: its type and how much health it has left. */
     private var shownBossType = -1
     private var shownBossHealth = 0f
+    private var shownBossHp = 0
+    private var shownBossMax = 0
 
     val over get() = phase == Phase.OVER
 
@@ -388,7 +390,7 @@ class World(seed: Long = 1L) {
      * For a client's copy of the world: takes the host's clock and phase
      * instead of running its own. Nothing else about the copy is simulated.
      */
-    fun adopt(tick: Int, stage: Int, phase: Phase, stageTicks: Int, players: Int, difficulty: Difficulty, bossType: Int, bossHealth: Float) {
+    fun adopt(tick: Int, stage: Int, phase: Phase, stageTicks: Int, players: Int, difficulty: Difficulty, bossType: Int, bossHealth: Float, bossHp: Int = 0, bossMax: Int = 0) {
         this.tick = tick
         this.stage = stage
         this.phase = phase
@@ -397,12 +399,19 @@ class World(seed: Long = 1L) {
         this.difficulty = difficulty
         shownBossType = bossType
         shownBossHealth = bossHealth
+        shownBossHp = bossHp
+        shownBossMax = bossMax
     }
 
     fun isBossStage() = devBoss >= 0 || stage % Bestiary.BOSS_EVERY == 0
 
     /** Type of the boss on the field, or -1. */
     fun bossType(): Int = if (boss >= 0) enemies.type[boss] else shownBossType
+
+    /** Health points the boss has left, for the bar's number. */
+    fun bossHp(): Int = if (boss >= 0) Math.ceil(enemies.hp[boss].toDouble()).toInt().coerceAtLeast(0) else shownBossHp
+
+    fun bossMaxHp(): Int = if (boss >= 0) Math.round(enemies.maxHp[boss]) else shownBossMax
 
     /** 0..1 health of the boss on the field. */
     fun bossHealth(): Float = if (boss >= 0) (enemies.hp[boss] / enemies.maxHp[boss]).coerceIn(0f, 1f) else shownBossHealth

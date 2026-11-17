@@ -81,6 +81,8 @@ object Protocol {
         buf.put(present.toByte())
         buf.put(w.bossType().toByte())
         buf.put((w.bossHealth() * 255).toInt().coerceIn(0, 255).toByte())
+        buf.putInt(w.bossHp())
+        buf.putInt(w.bossMaxHp())
         buf.put(w.bossesDown.coerceAtMost(255).toByte())
         val d = w.duel
         buf.put((if (d.on) 1 else 0).toByte())
@@ -226,6 +228,8 @@ object Protocol {
         s.present = buf.get().toInt() and 0xFF
         s.bossType = buf.get().toInt()
         s.bossHealth = (buf.get().toInt() and 0xFF) / 255f
+        s.bossHp = buf.int
+        s.bossMax = buf.int
         s.bossesDown = buf.get().toInt() and 0xFF
         s.duel = buf.get().toInt() != 0
         s.duelRound = buf.get().toInt() and 0xFF

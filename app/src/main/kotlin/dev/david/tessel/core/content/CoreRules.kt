@@ -6,25 +6,25 @@ object CoreRules {
     const val STAGE = 50
 
     /** Health, before the usual boss scaling. The second form has less. */
-    const val HP_FIRST = 6000f
-    const val HP_SECOND = 2400f
+    const val HP_FIRST = 3000f
+    const val HP_SECOND = 1200f
 
     /** A borrowed boss has this share of its usual health. */
-    const val ESCORT_HP = 0.34f
+    const val ESCORT_HP = 0.4f
 
     // Grid strikes.
-    const val CELL = 56f
-    const val WARN_SECONDS = 1.1f
-    const val HIT_SECONDS = 0.3f
+    const val CELL = 112f
+    const val WARN_SECONDS = 1.9f
+    const val HIT_SECONDS = 0.4f
     const val STUN_SECONDS = 1.5f
 
     /** Gap between strikes at the start of the first form, and how much faster it gets. */
-    const val STRIKE_GAP = 3.4f
-    const val STRIKE_GAP_MIN = 1.5f
+    const val STRIKE_GAP = 4.6f
+    const val STRIKE_GAP_MIN = 2.4f
 
     /** Every second of the fight makes the first form this much faster; losing health adds up to [HURRY_BY_HEALTH]. */
-    const val HURRY_PER_SECOND = 0.012f
-    const val HURRY_BY_HEALTH = 0.9f
+    const val HURRY_PER_SECOND = 0.007f
+    const val HURRY_BY_HEALTH = 0.6f
 
     /** The second form strikes this much less often, since eight bosses are already out. */
     const val SECOND_FORM_SLOWER = 1.5f

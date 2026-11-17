@@ -62,8 +62,8 @@ class CoreFightTest {
         val w = fight()
         until(w, 600) { w.core.strike == CoreFight.STRIKE_WARN }
         val lit = w.core.strikeParity
-        w.players.x[0] = 28f + 56f * lit
-        w.players.y[0] = 28f
+        w.players.x[0] = 56f + 112f * lit
+        w.players.y[0] = 56f
         w.players.hp[0] = 8
         w.players.maxHp[0] = 8
         until(w, 600) { w.core.strike == CoreFight.STRIKE_HIT }
@@ -76,8 +76,8 @@ class CoreFightTest {
         val w = fight()
         until(w, 600) { w.core.strike == CoreFight.STRIKE_WARN }
         val safe = 1 - w.core.strikeParity
-        w.players.x[0] = 28f + 56f * safe
-        w.players.y[0] = 28f
+        w.players.x[0] = 56f + 112f * safe
+        w.players.y[0] = 56f
         val before = w.players.hp[0]
         until(w, 600) { w.core.strike == CoreFight.STRIKE_HIT }
         run(w, 30, immortal = false)

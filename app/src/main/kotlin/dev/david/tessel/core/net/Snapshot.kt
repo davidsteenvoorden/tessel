@@ -32,6 +32,8 @@ class Snapshot {
 
     var bossType = -1
     var bossHealth = 0f
+    var bossHp = 0
+    var bossMax = 0
     var bossesDown = 0
 
     // A duel: no enemies, rounds between players.

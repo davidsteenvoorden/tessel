@@ -19,8 +19,8 @@ android {
         applicationId = "dev.david.tessel"
         minSdk = 26
         targetSdk = 37
-        versionCode = 16
-        versionName = "0.10"
+        versionCode = 20
+        versionName = "1.0"
         resValue("string", "app_name", "Tessel")
     }
 
