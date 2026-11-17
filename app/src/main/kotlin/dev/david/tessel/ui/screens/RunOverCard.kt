@@ -83,9 +83,15 @@ fun RunOverCard(visible: Boolean, summary: RunSummary?, onAgain: () -> Unit, onH
                 .padding(Space.x6),
             horizontalArrangement = Arrangement.spacedBy(Space.x8),
         ) {
+            val duel = summary.duel
+            if (duel != null) {
+                DuelOver(duel, onHome, onAgain)
+                return@Row
+            }
             // What ended it and what it was worth, with the way out.
             Column(Modifier.width(310.dp)) {
-                Text("Run over", Type.title1, c.ink)
+                val failedAtCore = !summary.won && summary.stage >= dev.david.tessel.core.content.CoreRules.STAGE
+                Text(if (summary.won) "Run completed" else if (failedAtCore) "Run failed" else "Run over", Type.title1, c.ink)
                 val sub = summary.difficulty.label + if (summary.newBest) "  ·  New best" else ""
                 Text(sub, Type.subhead, c.ink2)
                 Spacer(Modifier.height(Space.x4))
@@ -99,6 +105,28 @@ fun RunOverCard(visible: Boolean, summary: RunSummary?, onAgain: () -> Unit, onH
                 }
             }
             RunStats(summary, Modifier.weight(1f, fill = false).padding(top = Space.x2))
+        }
+    }
+}
+
+/** The end of a duel: the winner and the rounds each player took. */
+@Composable
+private fun DuelOver(duel: dev.david.tessel.platform.game.DuelResult, onHome: () -> Unit, onAgain: () -> Unit) {
+    val c = Theme.colors
+    Column(Modifier.width(420.dp)) {
+        Text(if (duel.won) "You win" else if (duel.champion.isEmpty()) "Duel over" else "${duel.champion} wins", Type.title1, c.ink)
+        Text("${duel.rounds} ${if (duel.rounds == 1) "round" else "rounds"} played", Type.subhead, c.ink2)
+        Spacer(Modifier.height(Space.x4))
+        for ((name, wins) in duel.wins) {
+            Row(Modifier.fillMaxWidth().padding(vertical = Space.x1)) {
+                Text(name, Type.body, c.ink, Modifier.weight(1f), maxLines = 1)
+                Text("$wins", Type.body.merge(Type.numbers), c.ink2)
+            }
+        }
+        Spacer(Modifier.height(Space.x5))
+        Row(horizontalArrangement = Arrangement.spacedBy(Space.x3)) {
+            SecondaryButton("Home", onHome, Modifier.weight(1f))
+            PrimaryButton("Rematch", onAgain, Modifier.weight(1f))
         }
     }
 }

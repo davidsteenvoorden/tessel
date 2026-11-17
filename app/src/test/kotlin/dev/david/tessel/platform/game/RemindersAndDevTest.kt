@@ -240,11 +240,9 @@ class RemindersAndDevTest {
         launch(seen = true)
         repeat(2) { n ->
             settle(1000)
-            if (n == 0) compose.onNodeWithText("Play").performClick() else {
-                compose.onNodeWithText("Play").performClick()
-                settle()
-                compose.onAllNodesWithText("New Run").onLast().performClick()
-            }
+            compose.onNodeWithText("Play").performClick()
+            settle()
+            compose.onAllNodesWithText("New Run").onLast().performClick()
             waitForMode(Mode.PLAYING)
             game.pause()
             waitForMode(Mode.PAUSED)

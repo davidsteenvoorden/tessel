@@ -36,7 +36,9 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -51,6 +53,7 @@ import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import dev.david.tessel.core.content.Difficulty
 import dev.david.tessel.core.sim.Checkpoint
+import dev.david.tessel.core.sim.DuelSetup
 import dev.david.tessel.platform.net.CoopLobby
 import dev.david.tessel.platform.net.FoundGame
 import dev.david.tessel.platform.net.LobbyState
@@ -65,6 +68,7 @@ import dev.david.tessel.ui.components.NavRow
 import dev.david.tessel.ui.components.PrimaryButton
 import dev.david.tessel.ui.components.SecondaryButton
 import dev.david.tessel.ui.components.Segmented
+import dev.david.tessel.ui.components.ToggleRow
 import dev.david.tessel.ui.components.Text
 import dev.david.tessel.ui.components.pressScale
 import dev.david.tessel.ui.theme.Corner
@@ -83,7 +87,6 @@ fun LobbyScreen(
     state: LobbyState,
     saved: Checkpoint?,
     settings: Settings,
-    onDifficulty: (Difficulty) -> Unit,
     onBack: () -> Unit,
 ) {
     val c = Theme.colors
@@ -168,7 +171,7 @@ fun LobbyScreen(
                             }
                         }
                     }
-                    else -> Stage(lobby, state, saved, settings, onDifficulty)
+                    else -> Stage(lobby, state, saved, settings)
                 }
             }
         }
@@ -176,7 +179,7 @@ fun LobbyScreen(
 }
 
 @Composable
-private fun Stage(lobby: CoopLobby, state: LobbyState, saved: Checkpoint?, settings: Settings, onDifficulty: (Difficulty) -> Unit) {
+private fun Stage(lobby: CoopLobby, state: LobbyState, saved: Checkpoint?, settings: Settings) {
     val c = Theme.colors
     val context = LocalContext.current
     var nfc by remember { mutableStateOf(TapReader.state(context)) }
@@ -257,15 +260,37 @@ private fun Stage(lobby: CoopLobby, state: LobbyState, saved: Checkpoint?, setti
                     }
                 }
                 Spacer(Modifier.height(Space.x4))
-                Segmented(
-                    options = Difficulty.entries.map { it.label },
-                    selected = settings.difficulty.ordinal,
-                    onSelect = { onDifficulty(Difficulty.entries[it]) },
-                )
-                Spacer(Modifier.height(Space.x1))
-                Text("${settings.difficulty.blurb} More players bring more enemies.", Type.footnote, c.ink3, Modifier.padding(start = Space.x1))
+                var duel by rememberSaveable { mutableStateOf(false) }
+                var rounds by rememberSaveable { mutableIntStateOf(1) }
+                var health by rememberSaveable { mutableIntStateOf(2) }
+                var power by rememberSaveable { mutableIntStateOf(0) }
+                Group(title = null) {
+                    ToggleRow("Duel", duel, { duel = it }, detail = "No enemies. Players shoot each other, last one standing takes the round.")
+                }
+                Spacer(Modifier.height(Space.x3))
+                if (duel) {
+                    Text("Rounds to win", Type.footnote.copy(fontWeight = FontWeight.SemiBold), c.ink2, Modifier.padding(start = Space.x1))
+                    Spacer(Modifier.height(Space.x1))
+                    Segmented(DuelSetup.TARGETS.map { "$it" }, rounds, { rounds = it })
+                    Spacer(Modifier.height(Space.x3))
+                    Text("Health each round", Type.footnote.copy(fontWeight = FontWeight.SemiBold), c.ink2, Modifier.padding(start = Space.x1))
+                    Spacer(Modifier.height(Space.x1))
+                    Segmented(DuelSetup.HEALTH.map { "$it" }, health, { health = it })
+                    Spacer(Modifier.height(Space.x3))
+                    Text("Starting upgrades for everyone", Type.footnote.copy(fontWeight = FontWeight.SemiBold), c.ink2, Modifier.padding(start = Space.x1))
+                    Spacer(Modifier.height(Space.x1))
+                    Segmented(DuelSetup.POWER_NAMES.toList(), power, { power = it })
+                } else {
+                    Text(
+                        "${settings.difficulty.blurb} More players bring more enemies. Difficulty is chosen in Play.",
+                        Type.footnote,
+                        c.ink3,
+                        Modifier.padding(start = Space.x1),
+                    )
+                }
                 Spacer(Modifier.height(Space.x5))
-                PrimaryButton("Start", { lobby.start(settings.difficulty) }, Modifier.fillMaxWidth())
+                val setup = if (duel) DuelSetup(DuelSetup.TARGETS[rounds], DuelSetup.HEALTH[health], power) else null
+                PrimaryButton("Start", { lobby.start(settings.difficulty, setup) }, Modifier.fillMaxWidth())
             }
         }
 

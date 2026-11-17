@@ -103,6 +103,7 @@ object Bestiary {
     const val PENDULUM = 22
     const val LATTICE = 23
     const val SOWER = 24
+    const val CORE = 25
 
     private val defs = arrayOf(
         EnemyDef(
@@ -221,6 +222,11 @@ object Bestiary {
         EnemyDef(
             "Sower", Shape.PENTAGON, radius = 42f, hp = 2600f, speed = 70f, mass = 60f, cost = 0f, coins = 100, hue = 112, tone = -1,
             move = Move.BOSS, boss = true, spin = 0.3f, blurb = "Leaves slow shots behind it and bursts them outward.",
+        ),
+        EnemyDef(
+            "Core", Shape.CIRCLE, radius = 58f, hp = CoreRules.HP_FIRST, speed = 34f, mass = 80f, cost = 0f, coins = 150, hue = 268, tone = -1,
+            move = Move.BOSS, boss = true, spin = 0.15f,
+            blurb = "Lights up squares of the floor and takes your perks. Then it calls the other bosses.",
         ),
     )
 

@@ -29,7 +29,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
-import dev.david.tessel.core.content.Difficulty
 import dev.david.tessel.platform.store.Settings
 import dev.david.tessel.platform.store.StickSize
 import dev.david.tessel.platform.update.UpdateState
@@ -85,17 +84,6 @@ fun SettingsScreen(
                 Modifier.widthIn(max = 600.dp).fillMaxWidth().padding(top = Space.x2),
                 verticalArrangement = Arrangement.spacedBy(Space.x6),
             ) {
-                val difficultyNote = if (inRun) " A change takes effect from the next run." else ""
-                Group("Difficulty", footer = settings.difficulty.blurb + difficultyNote) {
-                    Box(Modifier.padding(Space.x3)) {
-                        Segmented(
-                            options = Difficulty.entries.map { it.label },
-                            selected = settings.difficulty.ordinal,
-                            onSelect = { i -> onChange { it.copy(difficulty = Difficulty.entries[i]) } },
-                        )
-                    }
-                }
-
                 Group("Controls") {
                     Column(Modifier.padding(horizontal = Space.x4, vertical = Space.x3)) {
                         Text("Stick size", Type.body, c.ink)

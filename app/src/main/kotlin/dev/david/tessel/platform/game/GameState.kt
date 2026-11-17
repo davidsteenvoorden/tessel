@@ -72,6 +72,15 @@ class PlayerStats(
     val score: Int = 0,
 )
 
+/** How a duel ended: who won, and the rounds each player took. */
+class DuelResult(
+    val won: Boolean,
+    /** Name of the winner, or empty when nobody was left. */
+    val champion: String,
+    val rounds: Int,
+    val wins: List<Pair<String, Int>>,
+)
+
 /** A run so far, or as it ended. [kills], [coins] and [score] are this phone's player's; [team] has everyone. */
 class RunSummary(
     val seconds: Int,
@@ -91,8 +100,12 @@ class RunSummary(
     val newBest: Boolean = false,
     /** Names of the perks taken so far. */
     val perks: List<String> = emptyList(),
+    /** Set when the match was a duel instead of a run. */
+    val duel: DuelResult? = null,
+    /** The Core and its eight bosses fell: the run is completed. */
+    val won: Boolean = false,
 ) {
     val you get() = team.firstOrNull { it.you }
 
-    fun withBest(best: Boolean) = RunSummary(seconds, stage, kills, coins, difficulty, players, bosses, team, score, breakdown, killedBy, best, perks)
+    fun withBest(best: Boolean) = RunSummary(seconds, stage, kills, coins, difficulty, players, bosses, team, score, breakdown, killedBy, best, perks, duel, won)
 }

@@ -14,6 +14,7 @@ import dev.david.tessel.core.sim.MAX_HOSTILE
 import dev.david.tessel.core.sim.Phase
 import dev.david.tessel.core.sim.PlayerInput
 import dev.david.tessel.core.sim.REVIVE_TICKS
+import dev.david.tessel.core.sim.DuelSpawn
 import dev.david.tessel.core.sim.TICK_HZ
 import dev.david.tessel.core.sim.TICK_SECONDS
 import dev.david.tessel.core.sim.World
@@ -92,6 +93,8 @@ class ClientSession(val me: Int, private var players: Int, private val send: (By
     private var delay = FIRST_DELAY_NANOS
     private var lastFrameNanos = 0L
     private val pilot = Pilot()
+    private var placedForRound = -1
+    private val bump = dev.david.tessel.core.sim.Bump()
     private val buf = Wire.buffer(1024)
     private val reports = Reports()
     private val echo = Echo()
@@ -154,6 +157,7 @@ class ClientSession(val me: Int, private var players: Int, private val send: (By
         eventsThrough = arrivals
         gapTicks = 2f
         pilot.reset()
+        placedForRound = -1
         drift.clear()
         ghosts.clear()
         reports.clear()
@@ -179,6 +183,7 @@ class ClientSession(val me: Int, private var players: Int, private val send: (By
             eventsThrough = s.seq - 1
             jitter.reset()
             pilot.reset()
+        placedForRound = -1
             drift.clear()
             ghosts.clear()
             forgetGuesses()
@@ -234,9 +239,18 @@ class ClientSession(val me: Int, private var players: Int, private val send: (By
             farSteps = 0
         }
 
+        if (s.duel && s.duelRound != placedForRound) {
+            // A round begins: everyone's start is a fixed spot, and each phone moves its own player there.
+            placedForRound = s.duelRound
+            var rank = 0
+            val n = Integer.bitCount(s.present)
+            for (q in 0 until me) if (s.present and (1 shl q) != 0) rank++
+            pilot.place(DuelSpawn.x(rank, n), DuelSpawn.y(rank, n))
+        }
         steps++
         if (pilot.step(input, s, me)) view.events.add(Events.SHOT, me)
         stayOutOfBoss()
+        bumpIntoOthers(s)
         val before = reports.hits
         pilot.cull(view, reports)
         for (k in before until reports.hits) landed(s, reports.hitId[k], reports.hitX[k], reports.hitY[k])
@@ -299,6 +313,16 @@ class ClientSession(val me: Int, private var players: Int, private val send: (By
         val v = view
         val stageTicks = from.stageTicks + (to.stageTicks - from.stageTicks) * t
         v.adopt(floor(renderTick).toInt().coerceAtLeast(0), top.stage, top.phase, stageTicks.toInt(), top.playerCount, top.difficulty, top.bossType, top.bossHealth)
+
+        val dv = v.duel
+        dv.on = top.duel
+        dv.round = top.duelRound
+        dv.target = top.duelTarget
+        dv.pause = top.duelPause * TICK_HZ
+        dv.roundWinner = top.duelRoundWinner
+        dv.champion = top.duelChampion
+        for (p in 0 until top.playerCount) dv.wins[p] = top.duelWins[p]
+        v.core.show(top.coreForm, top.strike, top.strikeParity, top.strikeShare)
 
         val pl = v.players
         for (p in 0 until top.playerCount) {
@@ -493,22 +517,44 @@ class ClientSession(val me: Int, private var players: Int, private val send: (By
         }
     }
 
+    /** Other standing players are solid: back out of any that overlap, as the host does for its own player. */
+    private fun bumpIntoOthers(s: Snapshot) {
+        if (s.hp[me] <= 0) return
+        val r = Balance.PLAYER_RADIUS
+        for (q in 0 until s.playerCount) {
+            if (q == me || s.present and (1 shl q) == 0 || s.hp[q] <= 0) continue
+            if (!bump.from(pilot.x, pilot.y, s.px[q], s.py[q])) continue
+            pilot.place((pilot.x + bump.dx).coerceIn(r, ARENA_W - r), (pilot.y + bump.dy).coerceIn(r, ARENA_H - r))
+        }
+    }
+
     /** The boss does not budge for anyone; walking into it pushes the player back out, here as on the host. */
     private fun stayOutOfBoss() {
         val e = view.enemies
+        val r = Balance.PLAYER_RADIUS
         for (j in 0 until e.count) {
             val def = Bestiary.of(e.type[j])
-            if (!def.boss) continue
-            val reach = def.radius + Balance.PLAYER_RADIUS
+            if (!def.boss || inBubble(j)) continue
+            val reach = def.radius + r
             val dx = pilot.x - e.x[j]
             val dy = pilot.y - e.y[j]
             val d2 = dx * dx + dy * dy
-            if (d2 >= reach * reach || d2 < 0.0001f) return
+            if (d2 >= reach * reach || d2 < 0.0001f) continue
             val d = sqrt(d2)
-            val r = Balance.PLAYER_RADIUS
             pilot.place((e.x[j] + dx / d * reach).coerceIn(r, ARENA_W - r), (e.y[j] + dy / d * reach).coerceIn(r, ARENA_H - r))
-            return
         }
+    }
+
+    /** A boss the Core keeps in a bubble is out of the fight, so it does not push anyone. */
+    private fun inBubble(j: Int): Boolean {
+        val e = view.enemies
+        if (e.elite[j] != dev.david.tessel.core.content.Elite.TETHERED) return false
+        for (k in 0 until dev.david.tessel.core.sim.CoreFight.SLOTS) {
+            val dx = e.x[j] - view.core.slotX(k)
+            val dy = e.y[j] - view.core.slotY(k)
+            if (dx * dx + dy * dy < 16f) return true
+        }
+        return false
     }
 
     private fun guessed(ids: IntArray, until: IntArray, id16: Int): Boolean {

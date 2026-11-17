@@ -77,6 +77,9 @@ class PlayerState {
     /** Ticks left of a surge from an elite. */
     val surge = IntArray(MAX_PLAYERS)
 
+    /** Ticks left of a stun: no moving, no shooting. */
+    val stun = IntArray(MAX_PLAYERS)
+
     fun has(p: Int, perk: Int) = perks[p] shr perk and 1 != 0
 
     fun damage(p: Int): Float {
@@ -137,6 +140,7 @@ class PlayerState {
             windUsed[i] = false
             sinceHit[i] = OVERCLOCK_TICKS
             surge[i] = 0
+            stun[i] = 0
         }
     }
 

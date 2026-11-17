@@ -6,9 +6,11 @@ A landscape twin-stick shooter for Android. Left thumb moves, right thumb aims a
 
 ## How a run goes
 
-Each stage lasts a minute. When it ends you get a few seconds to clear what is left, then the shop opens. You can buy the same upgrade as many times as your coins allow, but every level costs more than the one before, and everything costs more the further you get, because coins are worth more too.
+Each stage lasts a minute. When it ends you get a few seconds to pick up what is left, then the shop opens. Coins still on the floor then are gone. You can buy the same upgrade as many times as your coins allow, but every level costs more than the one before, and everything costs more the further you get, because coins are worth more too.
 
 New kinds of enemy keep turning up as the stages go by: ones that keep their distance and shoot, ones that aim a line and charge down it, ones that split in two or in four, turrets that park and spin. Each kind has its own colour and shape. Enemy shots are always hollow orange rings, and anything that is about to fire or charge warns you first.
+
+Stage 50 is the last one, and it ends in the Core. In its first form it lights up squares of the floor in a checkerboard, first with red stripes as a warning and then solid for the hit, which costs health and stuns you for a moment, and it takes one perk from each player. The longer the fight lasts, and the less health it has, the faster it works. When it falls it comes back smaller, with the eight bosses of the game in bubbles round it on chains: it sends three out at a time, flies hurt ones back to be mended, and keeps taking perks. Beat the Core and all eight to complete the run; your perks come back when the Core falls. The run ends there, marked Completed, or Failed if you go down.
 
 From stage 6 some enemies are elites, wearing a gold ring: armored ones take half damage, fast ones run at you, splitting ones leave Pips behind and bursting ones fire a ring when they break. They have more health and pay more coins and score, and now and then one drops a surge, a few seconds of faster and harder shots. After each boss you choose one of three perks, such as Second Wind, Siphon or Shockwave, which last the rest of the run. From stage 4 the shop sometimes sells a rare upgrade: three levels in one buy at a higher price.
 
@@ -26,7 +28,9 @@ New players are offered a short tutorial the first time the game opens, and it c
 
 Settings has Break Reminders, off by default and adjustable from 20 to 90 minutes. When the time is up the game pauses behind a card that offers Save and Quit or Keep Playing. In a team the reminder pauses everyone, and whoever answers answers for all of them. Time away from the game for five minutes counts as a break.
 
-The Statistics page on the home screen has three tabs: an overview with your best score on each difficulty and your totals, a list of past runs, and a logbook of every enemy and boss. Enemies show as a grey outline until you meet them; after that the logbook counts how many you have beaten and how often each one has beaten you.
+The Statistics page on the home screen has four tabs: an overview with your best score on each difficulty and your totals, a list of past runs, a logbook of every enemy and boss, and achievements. Enemies show as a grey outline until you meet them; after that the logbook counts how many you have beaten and how often each one has beaten you.
+
+Achievements are cards in four tiers, Easy to Legendary, each with a progress bar. Counters step up, so killing 500 enemies is an Easy one and 100,000 is Legendary, and there are goals for bosses, depth, difficulties, time played, revives, co-op and duels. They are worked out from your saved history, so runs you already played count. Difficulty is chosen in the Play dialog and nowhere else; Play Together uses the same setting.
 
 There are four difficulties. Easy is for your first runs: slower and softer enemies, slower shots, ten health where Normal gives eight, more coins, and bosses with less than half their usual health. Normal is a fair fight. Hard and Impossible take all of that the other way.
 
@@ -36,7 +40,7 @@ There are four difficulties. Easy is for your first runs: slower and softer enem
 
 One phone taps Host and gets a four-letter code. The others tap Join and pick that code from the list. If your phones have NFC, the host can simply hold each friend's phone back to back with theirs and it joins on its own (Tessel has to be open on the friend's phone).
 
-The phones find each other and pair using Google's Nearby Connections, so they need Google Play services, and Bluetooth and Wi-Fi switched on. Wi-Fi does not have to be connected to a network. More players means more enemies, and bosses with more health. Coins are shared out evenly: whoever walks into one, everyone in the team gets the same amount.
+The phones find each other and pair using Google's Nearby Connections, so they need Google Play services, and Bluetooth and Wi-Fi switched on. Wi-Fi does not have to be connected to a network. More players means more enemies, and bosses with more health. Standing players are solid, so you can shove a teammate. The host can also tick Duel in the lobby: no enemies, shots hurt other players, and the last one standing takes the round. The host picks how many rounds to win, how much health everyone has and what shooting upgrades everyone starts with. A duel is never saved and does not count as a run, only toward the duel achievements. Coins are shared out evenly: whoever walks into one, everyone in the team gets the same amount.
 
 Once a game starts, if the phones are on the same Wi-Fi network (at home, or one phone's hotspot), they stop going through Nearby and talk straight to each other over that network. That is several times quicker, because Nearby adds its own delay to every message. If the direct link drops, they carry on through Nearby and try the direct link again a few seconds later. Nothing leaves your network.
 

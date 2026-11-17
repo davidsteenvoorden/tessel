@@ -184,6 +184,27 @@ class Screenshots {
         save(draw(scene, Palette.Dark), "boss.png")
     }
 
+    @Test
+    fun theCore() {
+        val scene = Scene(players = 1, stage = 49, seed = 5050, palette = Palette.Dark, density = density)
+        val w = scene.world
+        w.spawning = false
+        w.devBoss = Bestiary.CORE
+        w.bringDevBoss()
+        w.players.perks[0] = 1 shl 2
+        var guard = 0
+        while (w.core.strike != dev.david.tessel.core.sim.CoreFight.STRIKE_WARN && guard++ < 4000) scene.play(TICK_SECONDS)
+        repeat(40) { scene.play(TICK_SECONDS) }
+        save(draw(scene, Palette.Dark), "core-warn.png", checks)
+        while (w.core.strike != dev.david.tessel.core.sim.CoreFight.STRIKE_HIT && guard++ < 8000) scene.play(TICK_SECONDS)
+        repeat(3) { scene.play(TICK_SECONDS) }
+        save(draw(scene, Palette.Dark), "core-hit.png", checks)
+        val core = (0 until w.enemies.count).first { w.enemies.type[it] == Bestiary.CORE }
+        w.damageEnemy(core, 1_000_000f, 1f, 0f, 0)
+        repeat(60 * 12) { scene.play(TICK_SECONDS) }
+        save(draw(scene, Palette.Dark), "core-second.png", checks)
+    }
+
     /** Steps on to a frame where nothing is mid hit-flash, so every body shows its own colour. */
     private fun settle(scene: Scene) {
         val e = scene.world.enemies

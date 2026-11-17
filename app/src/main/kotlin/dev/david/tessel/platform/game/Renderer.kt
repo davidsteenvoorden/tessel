@@ -1,11 +1,19 @@
 package dev.david.tessel.platform.game
 
+import android.graphics.Bitmap
+import android.graphics.BitmapShader
 import android.graphics.Canvas
+import android.graphics.DashPathEffect
+import android.graphics.Shader
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
 import android.graphics.Typeface
 import dev.david.tessel.core.content.Balance
+import dev.david.tessel.core.content.CoreRules
+import dev.david.tessel.core.sim.CoreFight
+import dev.david.tessel.core.sim.ARENA_H
+import dev.david.tessel.core.sim.ARENA_W
 import dev.david.tessel.core.content.Bestiary
 import dev.david.tessel.core.content.Elite
 import dev.david.tessel.core.content.Move
@@ -82,8 +90,10 @@ class Renderer(private val density: Float, palette: Palette) {
         fill.color = palette.ground
         canvas.drawRect(view.left, view.top, view.right, view.bottom, fill)
 
+        drawStrike(canvas, w, view)
         drawCoins(canvas, w, blend, view)
         drawLines(canvas, w, blend, view)
+        drawBubbles(canvas, w, blend, view)
         drawEnemies(canvas, w, blend, view)
         shards.draw(canvas, view, fill)
         drawBullets(canvas, w, blend, view)
@@ -113,6 +123,93 @@ class Renderer(private val density: Float, palette: Palette) {
             .put("  draw ").putTenths(stats.drawMs)
             .put("  enemies ").put(enemies)
             .put("  bullets ").put(bullets)
+    }
+
+    // The Core's grid: red stripes warn, a solid flash lands.
+    private val stripes = Paint()
+    private var stripeColor = 0
+
+    private fun stripeShader(color: Int): Paint {
+        if (stripeColor != color) {
+            stripeColor = color
+            val size = 16
+            val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+            val c = Canvas(bmp)
+            val p = Paint(Paint.ANTI_ALIAS_FLAG)
+            p.color = color
+            p.alpha = 70
+            c.drawRect(0f, 0f, size.toFloat(), size.toFloat(), p)
+            p.alpha = 255
+            p.style = Paint.Style.STROKE
+            p.strokeWidth = size / 4f
+            for (k in -1..2) c.drawLine(k * size / 2f - 2f, size + 2f, k * size / 2f + size + 2f, -2f, p)
+            stripes.shader = BitmapShader(bmp, Shader.TileMode.REPEAT, Shader.TileMode.REPEAT)
+        }
+        return stripes
+    }
+
+    private fun drawStrike(canvas: Canvas, w: World, view: Viewport) {
+        val core = w.core
+        if (core.strike == CoreFight.STRIKE_NONE) return
+        val cell = CoreRules.CELL
+        val warn = core.strike == CoreFight.STRIKE_WARN
+        val paint = if (warn) stripeShader(palette.danger) else fill
+        if (warn) {
+            // Pulses faster as the moment comes.
+            paint.alpha = (110 + 145 * core.warnShare).toInt().coerceIn(0, 255)
+        } else {
+            paint.color = palette.danger
+            paint.alpha = (255 * core.warnShare).toInt().coerceIn(40, 255)
+        }
+        val cols = (ARENA_W / cell).toInt() + 1
+        val rows = (ARENA_H / cell).toInt() + 1
+        for (r in 0 until rows) {
+            for (c in 0 until cols) {
+                if ((r + c) and 1 != core.strikeParity) continue
+                val x0 = view.screenX(c * cell)
+                val y0 = view.screenY(r * cell)
+                val x1 = view.screenX(minOf((c + 1) * cell, ARENA_W))
+                val y1 = view.screenY(minOf((r + 1) * cell, ARENA_H))
+                canvas.drawRect(x0, y0, x1, y1, paint)
+            }
+        }
+        if (warn) paint.alpha = 255
+        fill.alpha = 255
+    }
+
+    private val chain = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+        pathEffect = DashPathEffect(floatArrayOf(0.1f, 14f), 0f)
+    }
+
+    /** Eight bubbles round the Core in its second form, and a chain to each boss it has borrowed. */
+    private fun drawBubbles(canvas: Canvas, w: World, blend: Float, view: Viewport) {
+        val core = w.core
+        if (core.form < 2) return
+        val e = w.enemies
+        var cx = ARENA_W / 2f
+        var cy = ARENA_H / 2f
+        for (i in 0 until e.count) {
+            if (e.type[i] == Bestiary.CORE) {
+                cx = lerp(e.prevX[i], e.x[i], blend)
+                cy = lerp(e.prevY[i], e.y[i], blend)
+            }
+        }
+        val sx = view.screenX(cx)
+        val sy = view.screenY(cy)
+        chain.color = palette.ink3
+        chain.strokeWidth = 3.2f * density
+        for (i in 0 until e.count) {
+            if (e.elite[i] != Elite.TETHERED) continue
+            canvas.drawLine(sx, sy, view.screenX(lerp(e.prevX[i], e.x[i], blend)), view.screenY(lerp(e.prevY[i], e.y[i], blend)), chain)
+        }
+        line.strokeCap = Paint.Cap.BUTT
+        line.color = palette.ink3
+        line.strokeWidth = 1.5f * density
+        for (k in 0 until CoreFight.SLOTS) {
+            canvas.drawCircle(view.screenX(core.slotX(k)), view.screenY(core.slotY(k)), CoreRules.BUBBLE_RADIUS * view.scale, line)
+        }
     }
 
     private fun drawCoins(canvas: Canvas, w: World, blend: Float, view: Viewport) {
@@ -168,7 +265,7 @@ class Renderer(private val density: Float, palette: Palette) {
             }
             // An elite wears a gold ring: thick when armored, dashed-looking thin for the quick ones.
             val trait = e.elite[i]
-            if (trait != 0) {
+            if (trait != 0 && trait != Elite.TETHERED) {
                 line.strokeCap = Paint.Cap.BUTT
                 line.color = palette.coin
                 line.strokeWidth = (if (trait == Elite.ARMORED) 4.5f else 2.5f) * density

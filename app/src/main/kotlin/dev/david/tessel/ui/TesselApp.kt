@@ -101,6 +101,7 @@ fun TesselApp(
     val breakDue by game.breakDue.collectAsState()
     val tutorial by game.tutorial.collectAsState()
     val coop = role != Role.SOLO
+    val duel by game.duel.collectAsState()
 
     var settingsOpen by rememberSaveable { mutableStateOf(false) }
     var lobbyOpen by rememberSaveable { mutableStateOf(false) }
@@ -182,7 +183,8 @@ fun TesselApp(
             PausePanel(
                 coop = coop,
                 host = role == Role.HOST,
-                stats = runStats,
+                stats = if (duel) null else runStats,
+                duel = duel,
                 onResume = game::resume,
                 onSettings = { settingsOpen = true },
                 onSave = game::saveForLater,
@@ -196,7 +198,8 @@ fun TesselApp(
             BreakPanel(
                 coop = coop,
                 minutes = settings.breakEvery,
-                stats = runStats,
+                stats = if (duel) null else runStats,
+                duel = duel,
                 onKeepPlaying = game::resume,
                 onSave = game::saveForLater,
             )
@@ -250,10 +253,9 @@ fun TesselApp(
             HomeScreen(
                 settings = settings,
                 ledger = ledger,
-                onPlay = { if (savedRuns.isEmpty()) game.startRun(settings.difficulty) else playOpen = true },
+                onPlay = { playOpen = true },
                 onTogether = { lobbyOpen = true },
                 onStats = { statsOpen = true },
-                onDifficulty = { d -> store.update { it.copy(difficulty = d) } },
                 onSettings = { settingsOpen = true },
                 onLogo = if (settings.devUnlocked) {
                     {
@@ -295,7 +297,6 @@ fun TesselApp(
                 state = lobbyState,
                 saved = saved,
                 settings = settings,
-                onDifficulty = { d -> store.update { it.copy(difficulty = d) } },
                 onBack = {
                     lobby.leave()
                     lobbyOpen = false

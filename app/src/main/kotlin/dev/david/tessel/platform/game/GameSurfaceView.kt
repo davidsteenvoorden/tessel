@@ -30,6 +30,7 @@ import dev.david.tessel.core.net.Wire
 import dev.david.tessel.core.sim.Bot
 import dev.david.tessel.core.sim.Cause
 import dev.david.tessel.core.sim.Checkpoint
+import dev.david.tessel.core.sim.DuelSetup
 import dev.david.tessel.core.sim.Events
 import dev.david.tessel.core.sim.MAX_PLAYERS
 import dev.david.tessel.core.sim.Phase
@@ -134,6 +135,11 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
     /** Solo runs kept for later. Set before the first run. */
     @Volatile var saves: SoloSaves? = null
     private val roleFlow = MutableStateFlow(Role.SOLO)
+    private val duelFlow = MutableStateFlow(false)
+
+    /** True while the game on screen is a duel: no saving, no enemies. */
+    val duel: StateFlow<Boolean> = duelFlow
+    private var duelSetup: DuelSetup? = null
     val role: StateFlow<Role> = roleFlow
 
     // What carries each link, from Nearby: 0 unknown, 1 Bluetooth LE, 2 Bluetooth, 3 Wi-Fi. Written on the main thread.
@@ -354,17 +360,23 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
         saves?.delete(slot)
     }
 
-    fun startCoopHost(link: HostLink, difficulty: Difficulty, players: Int) = onGameThread {
+    fun startCoopHost(link: HostLink, difficulty: Difficulty, players: Int, duel: DuelSetup? = null) = onGameThread {
         dropCoop()
         becomeRole(Role.HOST)
-        world.reset(players = players, seed = SystemClock.elapsedRealtimeNanos(), difficulty = difficulty)
+        duelSetup = duel
+        duelFlow.value = duel != null
+        if (duel != null) {
+            world.startDuel(players, SystemClock.elapsedRealtimeNanos(), duel)
+        } else {
+            world.reset(players = players, seed = SystemClock.elapsedRealtimeNanos(), difficulty = difficulty)
+        }
         for (p in 1 until players) world.remote[p] = true
         host = HostSession(world, link::send).also {
             for (p in 1 until players) it.connect(p)
             it.onRequest = ::onPartnerAsk
             it.announceStart()
         }
-        keep()
+        if (duel == null) keep()
         freshRun()
     }
 
@@ -392,6 +404,8 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
      * phone asks the host, who does the saving.
      */
     fun saveForLater() = onGameThread {
+        // A duel has nothing to keep.
+        if (duelFlow.value) return@onGameThread
         when (playingAs) {
             Role.CLIENT -> client?.action(Wire.SAVE)
             Role.HOST -> saveAndStop()
@@ -732,6 +746,7 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
                     homeDrawn = false
                     renderer.draw(canvas, shown, blend, viewport, shards, moveView, aimView, me)
                     val inset = cutout
+                    hud.names = names
                     hud.draw(canvas, shown, renderer.palette, inset.left, inset.top, inset.right, me, now)
                 }
             } finally {
@@ -783,6 +798,16 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
 
     /** Writes a finished run into the ledger once, and hands the end screen its summary. */
     private fun finishRun(run: RunSummary) {
+        val duel = run.duel
+        if (duel != null) {
+            // A duel is a match, not a run: it counts for the achievements and nothing else.
+            if (!recorded) {
+                recorded = true
+                ledger?.recordDuel(duel.won)
+            }
+            summaryFlow.value = run
+            return
+        }
         if (recorded || cheating) {
             summaryFlow.value = run
             return
@@ -815,6 +840,7 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
             downed = you?.downed ?: 0,
             revives = you?.revives ?: 0,
             upgrades = you?.upgrades ?: 0,
+            won = run.won,
         )
     }
 
@@ -839,6 +865,10 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
         val known = names
         if (playingAs == Role.CLIENT) {
             val s = c?.latest ?: return null
+            if (s.duel) {
+                val rows = (0 until s.playerCount).filter { s.present and (1 shl it) != 0 }
+                return duelSummary(s.duelChampion, s.duelRound, rows, { s.duelWins[it] }, known, s.tick / TICK_HZ)
+            }
             val team = (0 until s.playerCount).map { p ->
                 PlayerStats(
                     score = clientScore(s, p),
@@ -860,10 +890,14 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
             return RunSummary(
                 s.tick / TICK_HZ, s.stage, s.kills[me], s.earned[me], s.difficulty, Integer.bitCount(s.present), s.bossesDown, team,
                 score = breakdown.total, breakdown = breakdown, killedBy = s.killedBy[me],
-                perks = perkNames(s.perks[me]),
+                perks = perkNames(s.perks[me]), won = s.victory,
             )
         }
         val pl = world.players
+        if (world.duel.on) {
+            val rows = (0 until world.playerCount).filter { pl.present[it] }
+            return duelSummary(world.duel.champion, world.duel.round, rows, { world.duel.wins[it] }, known, world.tick / TICK_HZ)
+        }
         val team = (0 until world.playerCount).map { p ->
             PlayerStats(
                 score = world.score(p),
@@ -886,8 +920,20 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
         return RunSummary(
             world.tick / TICK_HZ, world.stage, pl.kills[me], pl.earned[me], world.difficulty, world.presentCount(), world.bossesDown, team,
             score = breakdown.total, breakdown = breakdown, killedBy = pl.killedBy[me],
-            perks = perkNames(pl.perks[me]),
+            perks = perkNames(pl.perks[me]), won = world.victory,
         )
+    }
+
+    /** The end card for a duel: who took it and the rounds each player won. */
+    private fun duelSummary(champion: Int, rounds: Int, rows: List<Int>, winsOf: (Int) -> Int, known: List<String>, seconds: Int): RunSummary {
+        val nameOf = { p: Int -> if (p == me) "You" else known.getOrNull(p) ?: "Player ${p + 1}" }
+        val duel = DuelResult(
+            won = champion == me,
+            champion = if (champion < 0) "" else nameOf(champion),
+            rounds = rounds,
+            wins = rows.map { nameOf(it) to winsOf(it) },
+        )
+        return RunSummary(seconds, 1, 0, 0, Difficulty.NORMAL, rows.size, duel = duel)
     }
 
     private fun perkNames(mask: Int) = (0 until Perks.count).filter { mask shr it and 1 != 0 }.map { Perks.of(it).name }
@@ -927,6 +973,18 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
                     haptics.down()
                 }
                 Events.BOSS_DOWN -> haptics.down()
+                Events.PERK_STOLEN -> if (ev.who[i] == me) {
+                    hud.notice("Core stole ${Perks.of(ev.ref[i].coerceIn(0, Perks.count - 1)).name}", now)
+                    haptics.hurt()
+                }
+                Events.PERK_BACK -> if (ev.who[i] == me) {
+                    hud.notice("Got back ${Perks.of(ev.ref[i].coerceIn(0, Perks.count - 1)).name}", now)
+                }
+                Events.CORE_CHANGE -> {
+                    hud.notice("The Core calls the other bosses", now)
+                    sfx.play(Sound.BOSS, now)
+                    haptics.down()
+                }
                 Events.PLAYER_HIT -> if (ev.who[i] == me) {
                     haptics.hurt()
                     sfx.play(Sound.HURT, now, 80L)
@@ -951,7 +1009,7 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
                             saves?.delete(soloSlot)
                             soloSlot = -1
                         }
-                        if (playingAs == Role.HOST) {
+                        if (playingAs == Role.HOST && !world.duel.on) {
                             // Nothing left to carry on.
                             checkpoint = null
                             onCheckpoint?.invoke(null)
@@ -985,6 +1043,7 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
     private fun followHost(c: ClientSession) {
         val s = c.latest ?: return
         breakFlow.value = s.paused && s.breaking
+        duelFlow.value = s.duel
         val wanted = when {
             s.paused -> Mode.PAUSED
             s.phase == Phase.SHOP -> Mode.SHOP
@@ -1051,11 +1110,16 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
     private fun restartHost() {
         // Players who left stay out of the new run too.
         val gone = BooleanArray(world.playerCount) { !world.players.present[it] }
-        world.reset(players = world.playerCount, seed = SystemClock.elapsedRealtimeNanos(), difficulty = world.difficulty)
+        val setup = duelSetup
+        if (setup != null) {
+            world.startDuel(world.playerCount, SystemClock.elapsedRealtimeNanos(), setup)
+        } else {
+            world.reset(players = world.playerCount, seed = SystemClock.elapsedRealtimeNanos(), difficulty = world.difficulty)
+        }
         for (p in 1 until world.playerCount) world.remote[p] = true
         for (p in gone.indices) if (gone[p]) world.removePlayer(p)
         host?.announceStart()
-        keep()
+        if (setup == null) keep()
         freshRun()
     }
 
@@ -1078,6 +1142,8 @@ class GameSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
 
     private fun dropCoop() {
         checkpoint = null
+        duelSetup = null
+        duelFlow.value = false
         host = null
         client = null
         loopback = null

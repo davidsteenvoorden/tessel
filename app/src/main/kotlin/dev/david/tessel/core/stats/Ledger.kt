@@ -28,6 +28,8 @@ class RunEntry(
     val downed: Int,
     val revives: Int,
     val upgrades: Int,
+    /** The run ended with the Core and its bosses beaten. */
+    val won: Boolean = false,
 )
 
 /** Everything added up over every run. */
@@ -44,6 +46,9 @@ class Totals {
     var upgrades = 0
     var bosses = 0
     var deepest = 0
+    var pvpPlayed = 0
+    var pvpWins = 0
+    var completed = 0
 
     fun add(e: RunEntry) {
         runs++
@@ -57,6 +62,7 @@ class Totals {
         revives += e.revives
         upgrades += e.upgrades
         bosses += e.bosses
+        if (e.won) completed++
         if (e.stage > deepest) deepest = e.stage
     }
 
@@ -64,6 +70,7 @@ class Totals {
         it.runs = runs; it.seconds = seconds; it.kills = kills; it.damage = damage; it.shots = shots
         it.coins = coins; it.hitsTaken = hitsTaken; it.downed = downed; it.revives = revives
         it.upgrades = upgrades; it.bosses = bosses; it.deepest = deepest
+        it.pvpPlayed = pvpPlayed; it.pvpWins = pvpWins; it.completed = completed
     }
 }
 
@@ -132,6 +139,19 @@ class Ledger {
 
     fun bestOn(difficulty: Difficulty) = best[difficulty.ordinal]
 
+    /** The best solo score on any difficulty, or null before the first run. */
+    fun bestOverall(): Best? {
+        var top: Best? = null
+        for (b in best) if (b != null && (top == null || b.score > top.score)) top = b
+        return top
+    }
+
+    /** Counts a finished PvP match. It is not a run: no score, no logbook entry. */
+    fun recordDuel(won: Boolean) {
+        totals.pvpPlayed++
+        if (won) totals.pvpWins++
+    }
+
     /** Adds a finished run. True when it is the best solo score on its difficulty so far. */
     fun record(e: RunEntry): Boolean {
         runs.add(0, e)
@@ -164,6 +184,7 @@ class Ledger {
             t.runs = o.runs; t.seconds = o.seconds; t.kills = o.kills; t.damage = o.damage; t.shots = o.shots
             t.coins = o.coins; t.hitsTaken = o.hitsTaken; t.downed = o.downed; t.revives = o.revives
             t.upgrades = o.upgrades; t.bosses = o.bosses; t.deepest = o.deepest
+            t.pvpPlayed = o.pvpPlayed; t.pvpWins = o.pvpWins; t.completed = o.completed
         }
         best.copyInto(c.best)
         seen.copyInto(c.seen)
@@ -216,6 +237,11 @@ class Ledger {
             buf.putShort(e.revives.toShort())
             buf.putShort(e.upgrades.toShort())
         }
+        // Added after the first release: older files simply end before this.
+        buf.putInt(t.pvpPlayed)
+        buf.putInt(t.pvpWins)
+        buf.putInt(t.completed)
+        for (e in runs) buf.put((if (e.won) 1 else 0).toByte())
         val out = ByteArray(buf.position())
         buf.flip()
         buf.get(out)
@@ -281,6 +307,22 @@ class Ledger {
                     val revives = buf.short.toInt()
                     val upgrades = buf.short.toInt()
                     l.runs.add(RunEntry(endedAt, difficulty, stage, seconds, score, kills, coins, bosses, players, killedBy, left, damage, shots, hits, downed, revives, upgrades))
+                }
+                if (buf.remaining() >= 8) {
+                    t.pvpPlayed = buf.int
+                    t.pvpWins = buf.int
+                }
+                // Added with the final boss: how many runs were won, and which.
+                if (buf.remaining() >= 4 + l.runs.size) {
+                    t.completed = buf.int
+                    for (k in l.runs.indices) {
+                        if (buf.get().toInt() == 0) continue
+                        val r = l.runs[k]
+                        l.runs[k] = RunEntry(
+                            r.endedAt, r.difficulty, r.stage, r.seconds, r.score, r.kills, r.coins, r.bosses, r.players, r.killedBy,
+                            r.left, r.damage, r.shots, r.hitsTaken, r.downed, r.revives, r.upgrades, won = true,
+                        )
+                    }
                 }
                 l
             } catch (_: BufferUnderflowException) {

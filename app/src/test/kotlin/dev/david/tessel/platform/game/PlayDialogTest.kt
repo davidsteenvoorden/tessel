@@ -69,9 +69,12 @@ class PlayDialogTest {
     }
 
     @Test
-    fun withNothingSavedPlayStartsARunAtOnce() {
+    fun withNothingSavedPlayStillOpensTheDialogWhereTheDifficultyIsChosen() {
         compose.mainClock.advanceTimeBy(1000)
         compose.onNodeWithText("Play").performClick()
+        compose.mainClock.advanceTimeBy(1500)
+        compose.waitForIdle()
+        compose.onAllNodesWithText("New Run").onLast().performClick()
         waitForMode(Mode.PLAYING)
     }
 

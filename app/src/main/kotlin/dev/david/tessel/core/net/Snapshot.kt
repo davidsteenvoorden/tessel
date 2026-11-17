@@ -34,6 +34,29 @@ class Snapshot {
     var bossHealth = 0f
     var bossesDown = 0
 
+    // A duel: no enemies, rounds between players.
+    var duel = false
+    var duelRound = 1
+    var duelTarget = 2
+
+    /** Seconds left of the pause after a round. */
+    var duelPause = 0
+    var duelRoundWinner = -1
+    var duelChampion = -1
+    val duelWins = IntArray(MAX_PLAYERS)
+
+    // The final fight: which form the Core is in and its grid strike.
+    var coreForm = 0
+    var strike = 0
+    var strikeParity = 0
+    var strikeShare = 0f
+
+    /** The run was won. */
+    var victory = false
+
+    /** Ticks left of a stun, by player. */
+    val stun = IntArray(MAX_PLAYERS)
+
     /** Local clock when it arrived. */
     var arrivalNanos = 0L
 

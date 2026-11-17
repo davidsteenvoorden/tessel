@@ -71,7 +71,7 @@ object Protocol {
         buf.put(w.stage.coerceAtMost(255).toByte())
         buf.put(w.phase.ordinal.toByte())
         buf.putInt(w.stageTicks)
-        buf.put(((if (paused) 1 else 0) or (if (waiting) 2 else 0) or (if (breaking) 4 else 0)).toByte())
+        buf.put(((if (paused) 1 else 0) or (if (waiting) 2 else 0) or (if (breaking) 4 else 0) or (if (w.victory) 8 else 0)).toByte())
         buf.put(w.difficulty.ordinal.toByte())
         buf.put(w.playerCount.toByte())
         buf.put(ready.toByte())
@@ -82,6 +82,17 @@ object Protocol {
         buf.put(w.bossType().toByte())
         buf.put((w.bossHealth() * 255).toInt().coerceIn(0, 255).toByte())
         buf.put(w.bossesDown.coerceAtMost(255).toByte())
+        val d = w.duel
+        buf.put((if (d.on) 1 else 0).toByte())
+        buf.put(d.round.coerceAtMost(255).toByte())
+        buf.put(d.target.toByte())
+        buf.put((if (d.pause == 0) 0 else (d.pause / TICK_HZ + 1).coerceAtMost(255)).toByte())
+        buf.put(d.roundWinner.toByte())
+        buf.put(d.champion.toByte())
+        buf.put(w.core.form.toByte())
+        buf.put(w.core.strike.toByte())
+        buf.put(w.core.strikeParity.toByte())
+        buf.put((w.core.warnShare * 255).toInt().coerceIn(0, 255).toByte())
 
         for (p in 0 until w.playerCount) {
             Wire.putPos(buf, pl.x[p])
@@ -117,6 +128,8 @@ object Protocol {
             buf.put(pl.killedBy[p].toByte())
             buf.putInt(pl.perks[p])
             buf.put((if (pl.surge[p] == 0) 0 else (pl.surge[p] / TICK_HZ + 1).coerceAtMost(255)).toByte())
+            buf.put(d.wins[p].toByte())
+            buf.put(pl.stun[p].coerceIn(0, 255).toByte())
         }
 
         val e = w.enemies
@@ -206,6 +219,7 @@ object Protocol {
         s.paused = flags and 1 != 0
         s.waiting = flags and 2 != 0
         s.breaking = flags and 4 != 0
+        s.victory = flags and 8 != 0
         s.difficulty = Difficulty.entries[buf.get().toInt()]
         s.playerCount = buf.get().toInt().coerceIn(1, MAX_PLAYERS)
         s.ready = buf.get().toInt() and 0xFF
@@ -213,6 +227,16 @@ object Protocol {
         s.bossType = buf.get().toInt()
         s.bossHealth = (buf.get().toInt() and 0xFF) / 255f
         s.bossesDown = buf.get().toInt() and 0xFF
+        s.duel = buf.get().toInt() != 0
+        s.duelRound = buf.get().toInt() and 0xFF
+        s.duelTarget = buf.get().toInt()
+        s.duelPause = buf.get().toInt() and 0xFF
+        s.duelRoundWinner = buf.get().toInt()
+        s.duelChampion = buf.get().toInt()
+        s.coreForm = buf.get().toInt()
+        s.strike = buf.get().toInt()
+        s.strikeParity = buf.get().toInt()
+        s.strikeShare = (buf.get().toInt() and 0xFF) / 255f
 
         for (p in 0 until s.playerCount) {
             s.px[p] = Wire.getPos(buf)
@@ -246,6 +270,8 @@ object Protocol {
             s.killedBy[p] = buf.get().toInt()
             s.perks[p] = buf.int
             s.surge[p] = buf.get().toInt() and 0xFF
+            s.duelWins[p] = buf.get().toInt()
+            s.stun[p] = buf.get().toInt() and 0xFF
         }
 
         s.enemyCount = buf.short.toInt().coerceIn(0, MAX_ENEMIES)

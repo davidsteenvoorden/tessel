@@ -45,7 +45,10 @@ object Elite {
     const val BURSTING = 4
     const val COUNT = 5
 
-    private val names = arrayOf("", "Armored", "Fast", "Splitting", "Bursting")
+    /** Marks a boss the Core has borrowed. Never picked at random, so it sits past [COUNT]. */
+    const val TETHERED = 5
+
+    private val names = arrayOf("", "Armored", "Fast", "Splitting", "Bursting", "Tethered")
 
     fun name(trait: Int) = names[trait]
 

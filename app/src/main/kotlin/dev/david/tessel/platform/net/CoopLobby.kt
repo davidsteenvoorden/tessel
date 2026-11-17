@@ -33,6 +33,7 @@ import dev.david.tessel.core.net.LocalAddress
 import dev.david.tessel.core.net.Pipe
 import dev.david.tessel.core.net.Wire
 import dev.david.tessel.core.sim.Checkpoint
+import dev.david.tessel.core.sim.DuelSetup
 import dev.david.tessel.core.sim.MAX_PLAYERS
 import dev.david.tessel.platform.game.GameSurfaceView
 import dev.david.tessel.platform.game.Mode
@@ -285,7 +286,7 @@ class CoopLobby(private val activity: ComponentActivity, private val game: GameS
     }
 
     /** Host only: starts the run on every phone. */
-    fun start(difficulty: Difficulty) {
+    fun start(difficulty: Difficulty, duel: DuelSetup? = null) {
         if (!hosting || playing) return
         resuming?.let {
             startSaved(it)
@@ -306,7 +307,7 @@ class CoopLobby(private val activity: ComponentActivity, private val game: GameS
         broadcastRoster(names)
         game.names = names
         stateFlow.value = LobbyState.Playing(host = true)
-        game.startCoopHost(toPlayers, difficulty, players)
+        game.startCoopHost(toPlayers, difficulty, players, duel)
         for (k in 1 until players) offerDirect(k)
     }
 

@@ -2,6 +2,7 @@ package dev.david.tessel.core.sim
 
 import dev.david.tessel.core.content.Balance
 import dev.david.tessel.core.content.Bestiary
+import dev.david.tessel.core.content.CoreRules
 import dev.david.tessel.core.content.Difficulty
 import dev.david.tessel.core.content.Elite
 import dev.david.tessel.core.content.Perks
@@ -37,6 +38,10 @@ private const val CLEAR_TICKS = Balance.CLEAR_SECONDS * TICK_HZ
 private const val GRID_CELL = 48f
 private const val FLASH_TICKS = 3
 private const val HURT_TICKS = 8
+
+/** Short, so a stream of shots keeps landing; long enough that one hit is not three. */
+private const val DUEL_INVULN_TICKS = 24
+private const val DUEL_PAUSE_TICKS = 3 * TICK_HZ
 private const val SEPARATION = 0.5f
 private const val MUZZLE = 1.3f
 private const val BULLET_MARGIN = 24f
@@ -164,6 +169,13 @@ class World(seed: Long = 1L) {
      * hit they dodged or a kill they landed. Here their shots are only drawn.
      */
     val remote = BooleanArray(MAX_PLAYERS)
+    private val bump = Bump()
+    val duel = Duel()
+    val core = CoreFight(this)
+
+    /** The run was won: the Core and its eight bosses are down. */
+    var victory = false
+        private set
 
     /** Bosses beaten this run, by the whole team. */
     var bossesDown = 0
@@ -211,6 +223,9 @@ class World(seed: Long = 1L) {
         bossesDown = 0
         shownBossType = -1
         remote.fill(false)
+        duel.clear()
+        core.reset()
+        victory = false
         director.startStage()
     }
 
@@ -219,7 +234,7 @@ class World(seed: Long = 1L) {
         tick++
         if (phase == Phase.FIGHT) {
             stageTicks++
-            if (stageTicks >= STAGE_TICKS && !isBossStage() && !practice) endFight()
+            if (stageTicks >= STAGE_TICKS && !isBossStage() && !practice && !duel.on) endFight()
         } else {
             clearTicks++
         }
@@ -231,12 +246,15 @@ class World(seed: Long = 1L) {
         coins.remember()
 
         for (p in 0 until playerCount) if (players.present[p]) updatePlayer(p, inputs[p])
+        bumpPlayers()
         if (bossDue > 0 && --bossDue == 0) bringBoss()
         brains.think()
+        core.tick()
         grid.clear()
-        for (i in 0 until enemies.count) if (i != boss) grid.insert(i, enemies.x[i], enemies.y[i])
+        for (i in 0 until enemies.count) if (!Bestiary.of(enemies.type[i]).boss) grid.insert(i, enemies.x[i], enemies.y[i])
         separateEnemies()
         moveBullets()
+        if (duel.on) duelStep()
         moveHostile()
         touchPlayers()
         revivePlayers()
@@ -247,14 +265,15 @@ class World(seed: Long = 1L) {
         enemies.sweep()
         coins.sweep()
         findBoss()
+        if (phase == Phase.OVER) return
         if (spawning && phase == Phase.FIGHT) director.update(this)
 
         when {
-            nobodyStanding() -> {
+            !duel.on && nobodyStanding() -> {
                 phase = Phase.OVER
                 events.add(Events.RUN_OVER, 0)
             }
-            phase == Phase.CLEAR && (enemies.count == 0 || clearTicks >= CLEAR_TICKS) -> openShop()
+            phase == Phase.CLEAR && ((enemies.count == 0 && coins.count == 0) || clearTicks >= CLEAR_TICKS) -> openShop()
         }
     }
 
@@ -557,23 +576,40 @@ class World(seed: Long = 1L) {
 
     private fun bringBoss() {
         val round = (stage / Bestiary.BOSS_EVERY - 1).coerceAtLeast(0)
-        val type = if (devBoss >= 0) devBoss else Bestiary.bossOrder[round % Bestiary.bossOrder.size]
+        val type = when {
+            devBoss >= 0 -> devBoss
+            stage == CoreRules.STAGE -> Bestiary.CORE
+            else -> Bestiary.bossOrder[round % Bestiary.bossOrder.size]
+        }
         val r = Bestiary.of(type).radius
         val i = spawnEnemy(type, ARENA_W / 2f, -r - 8f)
         if (i >= 0) {
             boss = i
+            if (type == Bestiary.CORE) core.begin()
             events.add(Events.BOSS_IN, type, ARENA_W / 2f, 0f)
         }
     }
 
+    /** Indices of every boss on the field, the Core's borrowed ones too. */
+    private val bigs = IntArray(16)
+    private var bigCount = 0
+
     private fun findBoss() {
         boss = -1
+        bigCount = 0
         for (i in 0 until enemies.count) {
-            if (Bestiary.of(enemies.type[i]).boss) {
-                boss = i
-                return
-            }
+            if (!Bestiary.of(enemies.type[i]).boss) continue
+            if (bigCount < bigs.size) bigs[bigCount++] = i
+            if (boss < 0 || enemies.type[i] == Bestiary.CORE) boss = i
         }
+    }
+
+    /** The run is won. */
+    internal fun win() {
+        if (phase == Phase.OVER) return
+        victory = true
+        phase = Phase.OVER
+        events.add(Events.RUN_OVER, 1)
     }
 
     private fun updatePlayer(p: Int, input: PlayerInput) {
@@ -585,10 +621,14 @@ class World(seed: Long = 1L) {
         if (pl.hurt[p] > 0) pl.hurt[p]--
         if (pl.sinceHit[p] < OVERCLOCK_TICKS) pl.sinceHit[p]++
         if (pl.surge[p] > 0) pl.surge[p]--
+        val stunned = pl.stun[p] > 0
+        if (stunned) pl.stun[p]--
 
         val travel = pl.moveSpeed(p) * (if (standing) 1f else Balance.DOWNED_SPEED) * TICK_SECONDS
         val r = Balance.PLAYER_RADIUS
-        if (input.hasPosition) {
+        if (stunned) {
+            // Held in place by a strike.
+        } else if (input.hasPosition) {
             val dx = input.posX - pl.x[p]
             val dy = input.posY - pl.y[p]
             val d = sqrt(dx * dx + dy * dy)
@@ -626,13 +666,157 @@ class World(seed: Long = 1L) {
             return
         }
         pl.reload[p] -= TICK_SECONDS
-        if (input.fire && aiming) {
+        if (input.fire && aiming && !stunned) {
             if (pl.reload[p] <= 0f) {
                 shoot(p)
                 pl.reload[p] += 1f / pl.fireRate(p)
             }
         } else if (pl.reload[p] < 0f) {
             pl.reload[p] = 0f
+        }
+    }
+
+    /** Starts a duel for [count] players: no enemies, everyone alike, shots hurt. */
+    fun startDuel(count: Int, seed: Long, setup: DuelSetup) {
+        reset(players = count, seed = seed, difficulty = Difficulty.NORMAL)
+        duel.on = true
+        duel.target = setup.target
+        spawning = false
+        val pl = players
+        val p = setup.power
+        for (i in 0 until playerCount) {
+            pl.maxHp[i] = setup.hp
+            pl.hp[i] = setup.hp
+            if (p == 0) continue
+            val lv = pl.levels[i]
+            lv[Upgrades.FIRE_RATE] = p * 3
+            lv[Upgrades.VELOCITY] = p * 2
+            lv[Upgrades.RANGE] = p * 2
+            lv[Upgrades.SPEED] = p * 2
+            lv[Upgrades.CALIBER] = p * 2
+            lv[Upgrades.MULTISHOT] = p
+        }
+        layoutDuel()
+    }
+
+    /** Everyone on a ring facing the middle. */
+    private fun layoutDuel() {
+        val pl = players
+        val n = max(1, presentCount())
+        var k = 0
+        for (i in 0 until playerCount) {
+            if (!pl.present[i]) continue
+            pl.x[i] = DuelSpawn.x(k, n)
+            pl.y[i] = DuelSpawn.y(k, n)
+            pl.prevX[i] = pl.x[i]
+            pl.prevY[i] = pl.y[i]
+            pl.aimX[i] = DuelSpawn.aimX(k, n)
+            pl.aimY[i] = DuelSpawn.aimY(k, n)
+            k++
+        }
+    }
+
+    /** A shot that reaches another standing player takes a health pip off them. True when it was used up. */
+    private fun duelHit(i: Int): Boolean {
+        if (duel.pause > 0) return false
+        val b = bullets
+        val owner = b.owner[i]
+        if (owner !in 0 until playerCount) return false
+        val pl = players
+        for (q in 0 until playerCount) {
+            if (q == owner || !pl.present[q] || !pl.alive(q) || pl.invuln[q] > 0) continue
+            val reach = b.radius[i] + Balance.PLAYER_RADIUS * 0.85f
+            val dx = b.x[i] - pl.x[q]
+            val dy = b.y[i] - pl.y[q]
+            if (dx * dx + dy * dy >= reach * reach) continue
+            pl.hp[q]--
+            pl.taken[q]++
+            pl.invuln[q] = DUEL_INVULN_TICKS
+            pl.hurt[q] = HURT_TICKS
+            pl.dealt[owner] += 1f
+            events.add(Events.PLAYER_HIT, q, pl.x[q], pl.y[q])
+            if (pl.hp[q] <= 0) {
+                pl.hp[q] = 0
+                pl.downs[q]++
+                pl.kills[owner]++
+                events.add(Events.PLAYER_DOWN, q, pl.x[q], pl.y[q])
+            }
+            return true
+        }
+        return false
+    }
+
+    /** Ends a round when one player is left, starts the next after a short pause, ends the match at the target. */
+    private fun duelStep() {
+        val d = duel
+        val pl = players
+        if (d.pause > 0) {
+            if (--d.pause > 0) return
+            if (d.champion >= 0) {
+                phase = Phase.OVER
+                events.add(Events.RUN_OVER, 0)
+            } else {
+                newRound()
+            }
+            return
+        }
+        var alive = 0
+        var last = -1
+        for (p in 0 until playerCount) if (pl.present[p] && pl.alive(p)) {
+            alive++
+            last = p
+        }
+        val here = presentCount()
+        if (here < 2) {
+            // Everyone else left: the one still here takes it.
+            d.champion = firstStanding()
+            d.roundWinner = d.champion
+            d.pause = DUEL_PAUSE_TICKS
+            return
+        }
+        if (alive > 1) return
+        d.roundWinner = if (alive == 1) last else -1
+        if (alive == 1) {
+            d.wins[last]++
+            if (d.wins[last] >= d.target) d.champion = last
+        }
+        d.pause = DUEL_PAUSE_TICKS
+    }
+
+    private fun firstStanding(): Int {
+        for (p in 0 until playerCount) if (players.present[p]) return p
+        return -1
+    }
+
+    private fun newRound() {
+        val pl = players
+        duel.round++
+        duel.roundWinner = -1
+        bullets.clear()
+        for (p in 0 until playerCount) {
+            if (!pl.present[p]) continue
+            pl.hp[p] = pl.maxHp[p]
+            pl.invuln[p] = DUEL_INVULN_TICKS
+            pl.hurt[p] = 0
+            pl.reload[p] = 0f
+            pl.killedBy[p] = Cause.NONE
+        }
+        layoutDuel()
+    }
+
+    /** Players on this phone give way to anyone standing too close. Joined phones do the same for themselves. */
+    private fun bumpPlayers() {
+        if (playerCount < 2) return
+        val pl = players
+        val r = Balance.PLAYER_RADIUS
+        for (p in 0 until playerCount) {
+            if (remote[p] || !pl.present[p] || !pl.alive(p)) continue
+            for (q in 0 until playerCount) {
+                if (q == p || !pl.present[q] || !pl.alive(q)) continue
+                if (!bump.from(pl.x[p], pl.y[p], pl.x[q], pl.y[q])) continue
+                pl.x[p] = (pl.x[p] + bump.dx).coerceIn(r, ARENA_W - r)
+                pl.y[p] = (pl.y[p] + bump.dy).coerceIn(r, ARENA_H - r)
+            }
         }
     }
 
@@ -661,8 +845,8 @@ class World(seed: Long = 1L) {
     private fun separateEnemies() {
         val e = enemies
         for (i in 0 until e.count) {
-            if (i == boss) continue
             val di = Bestiary.of(e.type[i])
+            if (di.boss) continue
             forEnemiesNear(e.x[i], e.y[i], di.radius + Bestiary.maxRegularRadius) { j ->
                 if (j > i) {
                     val dj = Bestiary.of(e.type[j])
@@ -687,18 +871,20 @@ class World(seed: Long = 1L) {
                 }
             }
         }
-        val b = boss
-        if (b < 0) return
-        val br = Bestiary.of(e.type[b]).radius
-        forEnemiesNear(e.x[b], e.y[b], br + Bestiary.maxRegularRadius) { j ->
-            val reach = br + Bestiary.of(e.type[j]).radius
-            val dx = e.x[j] - e.x[b]
-            val dy = e.y[j] - e.y[b]
-            val d2 = dx * dx + dy * dy
-            if (d2 < reach * reach && d2 > 0.0001f) {
-                val d = sqrt(d2)
-                e.x[j] = e.x[b] + dx / d * reach
-                e.y[j] = e.y[b] + dy / d * reach
+        for (k in 0 until bigCount) {
+            val b = bigs[k]
+            if (core.docked(b)) continue
+            val br = Bestiary.of(e.type[b]).radius
+            forEnemiesNear(e.x[b], e.y[b], br + Bestiary.maxRegularRadius) { j ->
+                val reach = br + Bestiary.of(e.type[j]).radius
+                val dx = e.x[j] - e.x[b]
+                val dy = e.y[j] - e.y[b]
+                val d2 = dx * dx + dy * dy
+                if (d2 < reach * reach && d2 > 0.0001f) {
+                    val d = sqrt(d2)
+                    e.x[j] = e.x[b] + dx / d * reach
+                    e.y[j] = e.y[b] + dy / d * reach
+                }
             }
         }
     }
@@ -722,6 +908,10 @@ class World(seed: Long = 1L) {
                     b.life[i] = 0
                     break
                 }
+                if (duel.on && duelHit(i)) {
+                    b.life[i] = 0
+                    break
+                }
                 val j = enemyTouching(b.x[i], b.y[i], b.radius[i], b.lastHit[i])
                 if (j < 0) continue
                 b.lastHit[i] = enemies.id[j]
@@ -742,11 +932,14 @@ class World(seed: Long = 1L) {
         damageEnemy(j, b.damage[bullet], b.vx[bullet] / speed, b.vy[bullet] / speed, b.owner[bullet])
     }
 
-    private fun damageEnemy(j: Int, damage: Float, ux: Float, uy: Float, owner: Int) {
+    internal fun damageEnemy(j: Int, damage: Float, ux: Float, uy: Float, owner: Int) {
         val e = enemies
         val def = Bestiary.of(e.type[j])
         // A boss cannot be hurt while it walks in, or while the Gyre takes its place, until it starts attacking.
-        if (def.boss && (e.mode[j] == 0 || (e.type[j] == Bestiary.GYRE && e.mode[j] == 1))) return
+        if (def.boss && (e.mode[j] == 0 || (e.type[j] == Bestiary.GYRE && e.mode[j] == 1 && e.elite[j] != Elite.TETHERED))) return
+        // The Core cannot be hurt while it changes form, and the bosses in its bubbles are out of reach.
+        if (e.type[j] == Bestiary.CORE && e.mode[j] == 2) return
+        if (core.docked(j)) return
         val shielded = e.type[j] == Bestiary.APIARY && brains.escorts > 0
         val armored = e.elite[j] == Elite.ARMORED
         val dealt = damage * (if (shielded) SHIELDED_DAMAGE else 1f) * (if (armored) Elite.ARMOR else 1f)
@@ -760,6 +953,7 @@ class World(seed: Long = 1L) {
             events.add(Events.ENEMY_HIT, e.type[j], e.x[j], e.y[j], ux, uy)
             return
         }
+        if (e.type[j] == Bestiary.CORE && core.intercept(j)) return
         kill(j, owner, ux, uy)
     }
 
@@ -768,7 +962,7 @@ class World(seed: Long = 1L) {
         val def = Bestiary.of(e.type[j])
         events.add(Events.ENEMY_KILLED, e.type[j], e.x[j], e.y[j], ux, uy, e.angle[j], e.id[j])
         players.kills[owner]++
-        val elite = e.elite[j] != Elite.NONE
+        val elite = e.elite[j] in 1 until Elite.COUNT
         players.points[owner] += Scoring.kill(e.type[j]) * (if (elite) 3 else 1)
         if (players.has(owner, Perks.SIPHON) && players.kills[owner] % 25 == 0 && players.hp[owner] in 1 until players.maxHp[owner]) {
             players.hp[owner]++
@@ -785,8 +979,12 @@ class World(seed: Long = 1L) {
         if (def.boss) {
             bossesDown++
             events.add(Events.BOSS_DOWN, e.type[j], e.x[j], e.y[j])
-            // The rest of the stage's enemies scatter once the boss falls.
-            if (phase == Phase.FIGHT) endFight()
+            if (e.type[j] == Bestiary.CORE || e.elite[j] == Elite.TETHERED) {
+                core.died(j)
+            } else if (phase == Phase.FIGHT) {
+                // The rest of the stage's enemies scatter once the boss falls.
+                endFight()
+            }
         }
     }
 
@@ -842,15 +1040,16 @@ class World(seed: Long = 1L) {
                     touchType = e.type[j]
                 }
             }
-            val b = boss
-            if (b >= 0 && e.hp[b] > 0f) {
+            for (k in 0 until bigCount) {
+                val b = bigs[k]
+                if (e.hp[b] <= 0f || core.docked(b)) continue
                 val reach = r + Bestiary.of(e.type[b]).radius
                 val dx = e.x[b] - px
                 val dy = e.y[b] - py
                 if (dx * dx + dy * dy < reach * reach) {
                     touched = true
                     touchType = e.type[b]
-                    // The boss does not budge; the player is pushed out instead.
+                    // A boss does not budge; the player is pushed out instead.
                     val d = sqrt(dx * dx + dy * dy).coerceAtLeast(0.001f)
                     pl.x[p] = (e.x[b] - dx / d * reach).coerceIn(r, ARENA_W - r)
                     pl.y[p] = (e.y[b] - dy / d * reach).coerceIn(r, ARENA_H - r)
@@ -877,7 +1076,7 @@ class World(seed: Long = 1L) {
         return true
     }
 
-    private fun hurtPlayer(p: Int, cause: Int) {
+    internal fun hurtPlayer(p: Int, cause: Int, loss: Int = -1) {
         val e = enemies
         val pl = players
         val px = pl.x[p]
@@ -885,13 +1084,13 @@ class World(seed: Long = 1L) {
         pl.sinceHit[p] = 0
         if (!practice && !invincible) {
             val by = Cause.type(cause)
-            val loss = if (by in 0 until Bestiary.size) devDamage[by] else 1
-            if (pl.hp[p] - loss <= 0 && pl.has(p, Perks.SECOND_WIND) && !pl.windUsed[p]) {
+            val amount = if (loss > 0) loss else if (by in 0 until Bestiary.size) devDamage[by] else 1
+            if (pl.hp[p] - amount <= 0 && pl.has(p, Perks.SECOND_WIND) && !pl.windUsed[p]) {
                 // A hit that would down the player leaves them on one health, once a stage.
                 pl.hp[p] = 1
                 pl.windUsed[p] = true
             } else {
-                pl.hp[p] -= loss
+                pl.hp[p] -= amount
             }
         }
         pl.taken[p]++
@@ -923,6 +1122,7 @@ class World(seed: Long = 1L) {
 
     /** A downed player comes back once a standing teammate has stayed close long enough. */
     private fun revivePlayers() {
+        if (duel.on) return
         if (playerCount < 2) return
         val pl = players
         val reach = Balance.REVIVE_REACH
@@ -1046,31 +1246,19 @@ class World(seed: Long = 1L) {
         return best
     }
 
-    /** Sweeps the arena: stragglers vanish, loose coins go to the nearest player, the shop opens. */
+    /** Sweeps the arena: stragglers and loose coins vanish, the shop opens. */
     private fun openShop() {
         val e = enemies
         for (i in 0 until e.count) events.add(Events.ENEMY_GONE, e.type[i], e.x[i], e.y[i], 0f, 0f, e.angle[i], e.id[i])
         e.clear()
         boss = -1
         shownBossType = -1
-        val c = coins
-        for (i in 0 until c.count) {
-            var p = nearestPlayer(c.x[i], c.y[i])
-            if (p < 0) p = firstPresent()
-            players.coins[p] += c.value[i]
-            players.earned[p] += c.value[i]
-        }
-        c.clear()
+        coins.clear()
         bullets.clear()
         hostile.clear()
         phase = Phase.SHOP
         shop.open(this)
         events.add(Events.SHOP_OPEN, stage)
-    }
-
-    private fun firstPresent(): Int {
-        for (p in 0 until playerCount) if (players.present[p]) return p
-        return 0
     }
 
     private fun nobodyStanding(): Boolean {
@@ -1095,8 +1283,9 @@ class World(seed: Long = 1L) {
                 }
             }
         }
-        val b = boss
-        if (b >= 0 && e.hp[b] > 0f && e.id[b] != skipId) {
+        for (k in 0 until bigCount) {
+            val b = bigs[k]
+            if (e.hp[b] <= 0f || e.id[b] == skipId || core.docked(b)) continue
             val rr = r + Bestiary.of(e.type[b]).radius
             val dx = e.x[b] - x
             val dy = e.y[b] - y

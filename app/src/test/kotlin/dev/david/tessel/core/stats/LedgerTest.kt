@@ -172,7 +172,7 @@ class LedgerTest {
         assertNull(Ledger.read(ByteArray(0)))
         assertNull(Ledger.read(byteArrayOf(1, 2, 3, 4)))
         val good = Ledger().also { it.record(run(5)) }.write()
-        assertNull(Ledger.read(good.copyOf(good.size - 9)))
+        assertNull(Ledger.read(good.copyOf(good.size - 20)))
         val wrongVersion = good.copyOf().also { it[2] = 99 }
         assertNull(Ledger.read(wrongVersion))
     }

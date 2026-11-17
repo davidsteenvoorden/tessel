@@ -31,6 +31,7 @@ fun BreakPanel(
     stats: RunSummary?,
     onKeepPlaying: () -> Unit,
     onSave: () -> Unit,
+    duel: Boolean = false,
 ) {
     val c = Theme.colors
     Row(
@@ -48,9 +49,13 @@ fun BreakPanel(
             }
             Text(detail, Type.subhead, c.ink2)
             Spacer(Modifier.height(Space.x4))
-            PrimaryButton(if (coop) "Multiplayer Pause" else "Save and Quit", onSave, Modifier.fillMaxWidth())
-            Spacer(Modifier.height(Space.x3))
-            SecondaryButton("Keep Playing", onKeepPlaying, Modifier.fillMaxWidth())
+            if (duel) {
+                PrimaryButton("Keep Playing", onKeepPlaying, Modifier.fillMaxWidth())
+            } else {
+                PrimaryButton(if (coop) "Multiplayer Pause" else "Save and Quit", onSave, Modifier.fillMaxWidth())
+                Spacer(Modifier.height(Space.x3))
+                SecondaryButton("Keep Playing", onKeepPlaying, Modifier.fillMaxWidth())
+            }
             Spacer(Modifier.height(Space.x2))
             Text("Reminders can be changed in Settings.", Type.footnote, c.ink3)
         }

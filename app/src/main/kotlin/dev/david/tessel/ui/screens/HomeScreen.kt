@@ -21,16 +21,13 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import dev.david.tessel.core.content.Difficulty
 import dev.david.tessel.core.stats.Ledger
 import dev.david.tessel.platform.store.Settings
 import dev.david.tessel.ui.components.Divider
 import dev.david.tessel.ui.components.Group
 import dev.david.tessel.ui.components.NavRow
 import dev.david.tessel.ui.components.PrimaryButton
-import dev.david.tessel.ui.components.Segmented
 import dev.david.tessel.ui.components.ShardMark
 import dev.david.tessel.ui.components.Text
 import dev.david.tessel.ui.theme.Space
@@ -44,7 +41,6 @@ fun HomeScreen(
     onPlay: () -> Unit,
     onTogether: () -> Unit,
     onStats: () -> Unit,
-    onDifficulty: (Difficulty) -> Unit,
     onSettings: () -> Unit,
     onLogo: (() -> Unit)? = null,
 ) {
@@ -68,27 +64,17 @@ fun HomeScreen(
             Spacer(Modifier.height(Space.x5))
             Text("Tessel", Type.display, c.ink)
             Spacer(Modifier.height(Space.x2))
-            val best = ledger.bestOn(settings.difficulty)
+            val best = ledger.bestOverall()
             val line = if (best == null) {
-                "No ${settings.difficulty.label} runs yet"
+                "No runs yet"
             } else {
-                "Best on ${settings.difficulty.label}: ${grouped(best.score)}  ·  Stage ${best.stage} in ${clock(best.seconds)}"
+                "Best: ${grouped(best.score)}  ·  Stage ${best.stage} in ${clock(best.seconds)}"
             }
             Text(line, Type.subhead.merge(Type.numbers), c.ink2)
         }
 
         Column(Modifier.width(360.dp)) {
             PrimaryButton("Play", onPlay, Modifier.fillMaxWidth().height(56.dp))
-            Spacer(Modifier.height(Space.x4))
-            Text("Difficulty", Type.footnote.copy(fontWeight = FontWeight.SemiBold), c.ink2, Modifier.padding(start = Space.x1))
-            Spacer(Modifier.height(6.dp))
-            Segmented(
-                options = Difficulty.entries.map { it.label },
-                selected = settings.difficulty.ordinal,
-                onSelect = { onDifficulty(Difficulty.entries[it]) },
-            )
-            Spacer(Modifier.height(Space.x1))
-            Text(settings.difficulty.blurb, Type.footnote, c.ink3, Modifier.padding(start = Space.x1))
             Spacer(Modifier.height(Space.x4))
             Group(title = null) {
                 NavRow("Play Together", onClick = onTogether, detail = "Up to eight phones, one team.")

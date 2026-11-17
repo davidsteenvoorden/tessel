@@ -70,5 +70,12 @@ class Events(private val capacity: Int = 512) {
 
         /** The enemy shot with id [who] was used up hitting someone. Only for other phones. */
         const val HOSTILE_GONE = 16
+
+        /** The Core took perk [ref] from player [who], or gave it back. */
+        const val PERK_STOLEN = 17
+        const val PERK_BACK = 18
+
+        /** The Core went from its first form to its second. */
+        const val CORE_CHANGE = 19
     }
 }

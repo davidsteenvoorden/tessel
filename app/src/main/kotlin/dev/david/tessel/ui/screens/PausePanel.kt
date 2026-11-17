@@ -42,6 +42,7 @@ fun PausePanel(
     onSave: () -> Unit,
     onLeave: () -> Unit,
     practice: Boolean = false,
+    duel: Boolean = false,
 ) {
     val c = Theme.colors
     var asking by remember { mutableStateOf(Asking.NOTHING) }
@@ -64,8 +65,10 @@ fun PausePanel(
                     if (practice) {
                         SecondaryButton("Leave Tutorial", onLeave, Modifier.fillMaxWidth())
                     } else {
-                        SecondaryButton(if (coop) "Multiplayer Pause" else "Save and Quit", { asking = Asking.SAVE }, Modifier.fillMaxWidth())
-                        Spacer(Modifier.height(Space.x3))
+                        if (!duel) {
+                            SecondaryButton(if (coop) "Multiplayer Pause" else "Save and Quit", { asking = Asking.SAVE }, Modifier.fillMaxWidth())
+                            Spacer(Modifier.height(Space.x3))
+                        }
                         SecondaryButton(if (coop) "Leave Game" else "Leave Run", { asking = Asking.LEAVE }, Modifier.fillMaxWidth(), tint = c.danger)
                     }
                 }
@@ -85,6 +88,7 @@ fun PausePanel(
                     },
                     detail = when {
                         !coop -> "The run is not kept. Save and Quit keeps it for later."
+                        duel && host -> "The duel ends for everyone."
                         host -> "The game ends for everyone and is not saved. Multiplayer Pause keeps it."
                         else -> "The others carry on without you."
                     },

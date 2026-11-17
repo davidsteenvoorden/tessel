@@ -52,8 +52,9 @@ class Pilot {
     fun step(input: PlayerInput, s: Snapshot, me: Int): Boolean {
         val standing = s.hp[me] > 0
         val travel = s.moveSpeed[me] * (if (standing) 1f else Balance.DOWNED_SPEED) * TICK_SECONDS
-        var mx = input.moveX
-        var my = input.moveY
+        val held = s.stun[me] > 0
+        var mx = if (held) 0f else input.moveX
+        var my = if (held) 0f else input.moveY
         val len = sqrt(mx * mx + my * my)
         if (len > 1f) {
             mx /= len
@@ -81,7 +82,7 @@ class Pilot {
 
         reload -= TICK_SECONDS
         var fired = false
-        if (standing && input.fire && aiming) {
+        if (standing && input.fire && aiming && !held) {
             if (reload <= 0f) {
                 volley(s, me)
                 reload += 1f / s.fireRate[me]

@@ -4,6 +4,9 @@ package dev.david.tessel.core.content
 object Balance {
     const val PLAYER_RADIUS = 14f
 
+    /** How much of an overlap between two players each one backs out of. Above half, so a bump springs a little. */
+    const val PUSH_SHARE = 0.55f
+
     /** Cut from 220 after user test #2 ("too overpowered at the start"); Speed upgrades buy it back. */
     const val PLAYER_SPEED = 195f
     const val PLAYER_HP = 6

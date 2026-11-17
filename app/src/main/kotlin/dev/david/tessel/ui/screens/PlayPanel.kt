@@ -63,7 +63,7 @@ fun PlayPanel(
                 onSelect = { onDifficulty(Difficulty.entries[it]) },
             )
             Spacer(Modifier.height(Space.x1))
-            Text(difficulty.blurb, Type.footnote, c.ink3, Modifier.padding(start = Space.x1))
+            Text("${difficulty.blurb} Play Together uses this too.", Type.footnote, c.ink3, Modifier.padding(start = Space.x1))
             Spacer(Modifier.height(Space.x4))
             PrimaryButton("New Run", onNew, Modifier.fillMaxWidth(), enabled = !full)
             if (full) {
@@ -81,6 +81,7 @@ fun PlayPanel(
                 Modifier.heightIn(max = 250.dp).verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(Space.x2),
             ) {
+                if (saves.isEmpty()) Text("Nothing saved yet. A run you leave is kept here.", Type.subhead, c.ink3)
                 for (save in saves) SavedRun(save, now, { onContinue(save.slot) }, { onDelete(save.slot) })
             }
         }

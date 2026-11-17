@@ -54,6 +54,9 @@ class Hud(private val density: Float, fontScale: Float) {
     /** The tutorial draws health only: no stage, clock, score or link. */
     var practice = false
 
+    /** Co-op names by player number, for the duel's score line. */
+    var names: List<String> = emptyList()
+
     /** A small note under the stage bar, for runs that are not counted. Null for none. */
     var tag: String? = null
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -70,6 +73,15 @@ class Hud(private val density: Float, fontScale: Float) {
     /** Seconds left of a surge, 0 for none. */
     fun surge(seconds: Int) {
         surgeSeconds = seconds
+    }
+
+    private var noticeText: String? = null
+    private var noticeAt = 0L
+
+    /** A line of news in the middle of the screen for a few seconds: "Core stole Siphon". */
+    fun notice(text: String, now: Long) {
+        noticeText = text
+        noticeAt = now
     }
 
     private var announced = -1
@@ -132,13 +144,14 @@ class Hud(private val density: Float, fontScale: Float) {
         }
 
         if (practice) return
-        if (surgeSeconds > 0) {
+        if (surgeSeconds > 0 && !w.duel.on) {
             note.color = palette.coin
             canvas.drawText("Surge $surgeSeconds", insetLeft + 20f * density + 30f * density, coinRow + 22f * density + (w.playerCount - 1) * 14f * density, note)
         }
-        drawStageBar(canvas, w, palette, insetTop, me)
+        if (w.duel.on) drawDuel(canvas, w, palette, insetTop, me) else drawStageBar(canvas, w, palette, insetTop, me)
         drawClock(canvas, w, palette, insetTop, insetRight)
         drawAnnouncement(canvas, palette, now)
+        drawNotice(canvas, palette, now)
         drawLink(canvas, palette, insetTop, insetRight)
     }
 
@@ -179,6 +192,19 @@ class Hud(private val density: Float, fontScale: Float) {
         canvas.drawText(label, labelLeft, baseline, linkText)
         fill.color = tint
         canvas.drawCircle(labelLeft - gap, baseline - linkText.textSize * 0.32f, 3.5f * density, fill)
+    }
+
+    private fun drawNotice(canvas: Canvas, palette: Palette, now: Long) {
+        val text = noticeText ?: return
+        val age = now - noticeAt
+        if (age > NOTICE_MS) {
+            noticeText = null
+            return
+        }
+        stageLabel.color = palette.danger
+        stageLabel.alpha = (255 * ((NOTICE_MS - age) / 500f).coerceIn(0f, 1f)).toInt()
+        canvas.drawText(text, canvas.width / 2f, canvas.height * 0.62f, stageLabel)
+        stageLabel.alpha = 255
     }
 
     private fun drawAnnouncement(canvas: Canvas, palette: Palette, now: Long) {
@@ -299,7 +325,7 @@ class Hud(private val density: Float, fontScale: Float) {
         val filled = width * share
         if (filled > height) canvas.drawRoundRect(left, top, left + filled, top + height, round, round, fill)
 
-        if (w.playerCount > 1) {
+        if (w.playerCount > 1 && !w.duel.on) {
             val pl = w.players
             var someoneDown = false
             for (p in 0 until w.playerCount) if (p != me && pl.present[p] && !pl.alive(p)) someoneDown = true
@@ -319,6 +345,53 @@ class Hud(private val density: Float, fontScale: Float) {
         }
     }
 
+    /** Writes the name to show for player [p] into the text buffer. */
+    private fun putName(p: Int, me: Int) {
+        if (p == me) {
+            buf.put("You")
+            return
+        }
+        val n = names.getOrNull(p)
+        if (n.isNullOrBlank()) buf.put("Player ").put(p + 1) else buf.put(if (n.length > 10) n.substring(0, 10) else n)
+    }
+
+    /** The round and who has won how many, and between rounds who took the last one. */
+    private fun drawDuel(canvas: Canvas, w: World, palette: Palette, insetTop: Int, me: Int) {
+        val d = w.duel
+        val cx = canvas.width / 2f
+        val baseline = insetTop + 26f * density
+        stageLabel.color = palette.ink
+        buf.clear().put("Round ").put(d.round).put("  ·  First to ").put(d.target)
+        canvas.drawText(buf.chars, 0, buf.length, cx, baseline, stageLabel)
+        val pl = w.players
+        buf.clear()
+        var first = true
+        for (p in 0 until w.playerCount) {
+            if (!pl.present[p]) continue
+            if (!first) buf.put("   ")
+            first = false
+            putName(p, me)
+            buf.put(" ").put(d.wins[p])
+        }
+        note.color = palette.ink2
+        canvas.drawText(buf.chars, 0, buf.length, cx, baseline + 20f * density, note)
+        if (d.pause > 0) {
+            buf.clear()
+            val who = if (d.champion >= 0) d.champion else d.roundWinner
+            when {
+                who < 0 -> buf.put("Nobody takes the round")
+                who == me -> buf.put(if (d.champion >= 0) "You win the duel" else "You take the round")
+                else -> {
+                    putName(who, me)
+                    buf.put(if (d.champion >= 0) " wins the duel" else " takes the round")
+                }
+            }
+            title.color = palette.ink
+            title.alpha = 255
+            canvas.drawText(buf.chars, 0, buf.length, cx, canvas.height * 0.36f, title)
+        }
+    }
+
     private fun semibold(): Typeface =
         if (Build.VERSION.SDK_INT >= 28) Typeface.create(Typeface.DEFAULT, 600, false) else Typeface.DEFAULT_BOLD
 
@@ -328,6 +401,7 @@ class Hud(private val density: Float, fontScale: Float) {
 
         const val TRACK_ALPHA = 90
         const val ANNOUNCE_MS = 3200L
+        const val NOTICE_MS = 3400L
 
         /** Under this round trip the link is green; under [SLOW_MS] amber; from there red. */
         const val GOOD_MS = 60

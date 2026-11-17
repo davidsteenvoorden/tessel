@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -28,12 +29,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import dev.david.tessel.core.content.Bestiary
 import dev.david.tessel.core.content.Difficulty
 import dev.david.tessel.core.sim.Cause
+import dev.david.tessel.core.stats.Achievement
+import dev.david.tessel.core.stats.Achievements
 import dev.david.tessel.core.stats.Ledger
+import dev.david.tessel.core.stats.Tier
 import dev.david.tessel.core.stats.RunEntry
 import dev.david.tessel.ui.components.BackButton
 import dev.david.tessel.ui.components.Divider
@@ -47,7 +52,7 @@ import dev.david.tessel.ui.theme.Space
 import dev.david.tessel.ui.theme.Theme
 import dev.david.tessel.ui.theme.Type
 
-private val tabs = listOf("Overview", "Runs", "Logbook")
+private val tabs = listOf("Overview", "Runs", "Logbook", "Achievements")
 
 /**
  * Everything the phone remembers about past runs: totals and bests, the
@@ -68,7 +73,7 @@ fun StatsScreen(ledger: Ledger, now: Long, onErase: () -> Unit, onBack: () -> Un
             Text("Statistics", Type.headline, c.ink, Modifier.align(Alignment.Center))
         }
         Box(Modifier.fillMaxWidth().padding(horizontal = Space.x6), contentAlignment = Alignment.Center) {
-            Segmented(tabs, tab, { tab = it }, Modifier.widthIn(max = 420.dp))
+            Segmented(tabs, tab, { tab = it }, Modifier.widthIn(max = 600.dp))
         }
         Spacer(Modifier.height(Space.x3))
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
@@ -79,7 +84,8 @@ fun StatsScreen(ledger: Ledger, now: Long, onErase: () -> Unit, onBack: () -> Un
                 when (tab) {
                     0 -> overview(ledger, onErase)
                     1 -> runs(ledger, now)
-                    else -> logbook(ledger)
+                    2 -> logbook(ledger)
+                    else -> achievements(ledger)
                 }
                 item { Spacer(Modifier.height(Space.x6)) }
             }
@@ -171,7 +177,9 @@ private fun RunRow(e: RunEntry, now: Long) {
             val team = if (e.players > 1) "  ·  Co-op, ${e.players}" else ""
             Text("Stage ${e.stage}  ·  ${e.difficulty.label}$team", Type.headline, c.ink, maxLines = 1)
             val how = when {
+                e.won -> "Completed"
                 e.left -> "Left the run"
+                e.stage >= dev.david.tessel.core.content.CoreRules.STAGE -> "Failed at the Core"
                 type in 0 until Bestiary.size -> "Killed by ${Bestiary.of(type).name}"
                 else -> "Killed"
             }
@@ -266,4 +274,67 @@ internal fun playtime(seconds: Int): String = when {
     seconds >= 3_600 -> "${seconds / 3_600} h ${seconds % 3_600 / 60} min"
     seconds >= 60 -> "${seconds / 60} min"
     else -> "$seconds s"
+}
+
+
+private fun tierColor(t: Tier, c: dev.david.tessel.ui.theme.Colors): Color = when (t) {
+    Tier.EASY -> c.accent
+    Tier.MEDIUM -> c.perk
+    Tier.HARD -> c.rare
+    Tier.LEGENDARY -> c.coin
+}
+
+private fun androidx.compose.foundation.lazy.LazyListScope.achievements(ledger: Ledger) {
+    item {
+        Text(
+            "${Achievements.doneCount(ledger)} of ${Achievements.all.size} done",
+            Type.footnote.merge(Type.numbers),
+            Theme.colors.ink2,
+            Modifier.padding(start = Space.x1, bottom = Space.x1),
+        )
+    }
+    for (tier in Tier.entries) {
+        val list = Achievements.all.filter { it.tier == tier }
+        val done = list.count { it.done(ledger) }
+        item {
+            Text(
+                "${tier.label}  ·  $done of ${list.size}",
+                Type.footnote.copy(fontWeight = FontWeight.SemiBold),
+                tierColor(tier, Theme.colors),
+                Modifier.padding(start = Space.x1, top = Space.x2),
+            )
+        }
+        items(list.chunked(2)) { pair ->
+            Row(Modifier.fillMaxWidth().heightIn(min = 92.dp), horizontalArrangement = Arrangement.spacedBy(Space.x2)) {
+                for (a in pair) Card(a, ledger, Modifier.weight(1f).fillMaxHeight())
+                if (pair.size == 1) Spacer(Modifier.weight(1f))
+            }
+        }
+    }
+}
+
+@Composable
+private fun Card(a: Achievement, ledger: Ledger, modifier: Modifier) {
+    val c = Theme.colors
+    val have = a.progress(ledger).coerceAtMost(a.target)
+    val done = have >= a.target
+    val tint = tierColor(a.tier, c)
+    Column(
+        modifier
+            .clip(RoundedCornerShape(Corner.button))
+            .background(c.surface)
+            .padding(Space.x3),
+        verticalArrangement = Arrangement.spacedBy(Space.x1),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(a.name, Type.headline, if (done) c.ink else c.ink2, Modifier.weight(1f), maxLines = 1)
+            if (done) Text("Done", Type.footnote.copy(fontWeight = FontWeight.SemiBold), tint)
+        }
+        Text(a.text, Type.footnote, c.ink2, maxLines = 2)
+        Spacer(Modifier.weight(1f))
+        Box(Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)).background(c.track)) {
+            Box(Modifier.fillMaxHeight().fillMaxWidth(have.toFloat() / a.target).background(tint))
+        }
+        if (!done) Text("${grouped(have)} / ${grouped(a.target)}", Type.footnote.merge(Type.numbers), c.ink3, maxLines = 1)
+    }
 }

@@ -94,6 +94,8 @@ internal class Brains(private val w: World) {
             val target = w.nearestPlayer(e.x[i], e.y[i])
             dvx = 0f
             dvy = 0f
+            // A boss borrowed by the Core may be in its bubble, or flying back to it.
+            if (e.elite[i] == Elite.TETHERED && w.core.tend(i)) continue
             when (def.move) {
                 Move.CHASE -> chase(i, target, def.speed * scale)
                 Move.BOUNCE -> bounce(i, def, def.speed * scale)
@@ -352,9 +354,20 @@ internal class Brains(private val w: World) {
             Bestiary.PENDULUM -> pendulum(i, def, target, scale, rate, phase)
             Bestiary.LATTICE -> lattice(i, def, target, scale, rate, phase)
             Bestiary.SOWER -> sower(i, def, target, scale, rate, phase)
+            Bestiary.CORE -> core(i, def, target, scale, rate)
         }
         val charging = e.type[i] == Bestiary.LANCER && e.mode[i] == LANCE_CHARGE
         if (!charging) keepIn(i, def.radius)
+    }
+
+    /** Slow to chase in its first form; in its second it sits in the middle of its bubbles. */
+    private fun core(i: Int, def: EnemyDef, target: Int, scale: Float, rate: Float) {
+        val e = w.enemies
+        when (e.mode[i]) {
+            1 -> chase(i, target, def.speed * scale)
+            else -> seek(i, ARENA_W / 2f, ARENA_H / 2f, def.speed * 2f)
+        }
+        w.core.think(i, rate)
     }
 
     /** Rings of shots with a gap to slip through; calls in help from the second phase. */

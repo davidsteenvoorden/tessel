@@ -38,6 +38,12 @@ class LedgerStore(private val file: File) {
         best
     }
 
+    /** Counts a finished duel. */
+    fun recordDuel(won: Boolean) = synchronized(lock) {
+        ledger.recordDuel(won)
+        publish()
+    }
+
     /** Folds a run's logbook tally in and empties the tally. */
     fun merge(tally: Tally) {
         if (tally.isEmpty) return
